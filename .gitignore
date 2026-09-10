@@ -1,0 +1,20 @@
+node_modules/
+test-output/
+
+# Full-resolution App Store screenshots (~30 MB) — regenerate with
+# `npm run screenshots`. The small README previews in docs/ are tracked.
+store/screenshots/
+android/
+.DS_Store
+*.log
+.env
+
+# Capacitor copies www/ into the iOS project on `cap sync`; the source of truth
+# is www/, so the copy is not tracked (ios/.gitignore covers the rest).
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+ios/App/build/
+ios/App/output/
+ios/DerivedData/
+ios/capacitor-cordova-ios-plugins/

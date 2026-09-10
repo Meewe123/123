@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Regenerate art and check it is up to date
+        run: |
+          python3 tools/make_icons.py
+          git diff --exit-code -- www/assets/icons ios/App/App/Assets.xcassets \
+            || (echo "::error::Art is out of date — run 'npm run icons' and commit."; exit 1)
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install Chromium for the browser tests
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: test-output/
+          retention-days: 7
