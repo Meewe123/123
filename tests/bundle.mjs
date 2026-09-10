@@ -91,7 +91,6 @@ async function main() {
     check('the loop keeps a sane frame rate', attract.fps > 25, `fps=${attract.fps.toFixed(1)}`);
 
     console.log('\nplaying');
-    await page.evaluate(() => { globalThis.__ORBITAL__.profile.seenTutorial = true; });
     await page.locator('#btn-play').click();
     await page.waitForFunction(() => globalThis.__ORBITAL__.mode === 'play', null, { timeout: 3000 });
     // Track the best the demo reached rather than whatever the clock lands on,
@@ -99,10 +98,10 @@ async function main() {
     await page.evaluate(() => {
       const g = globalThis.__ORBITAL__;
       g.demo = true;
-      g.__peak = { score: 0, energy: 0 };
+      g.__peak = { score: 0, shards: 0 };
       g.__peakTimer = setInterval(() => {
         g.__peak.score = Math.max(g.__peak.score, g.world.score);
-        g.__peak.energy = Math.max(g.__peak.energy, g.world.energy);
+        g.__peak.shards = Math.max(g.__peak.shards, g.world.shards);
       }, 100);
     });
     await wait(12000);
@@ -112,7 +111,7 @@ async function main() {
       return g.__peak;
     });
     check('a run scores', play.score > 3, `score=${play.score}`);
-    check('energy is collected', play.energy > 0, `energy=${play.energy}`);
+    check('shards are collected', play.shards > 0, `shards=${play.shards}`);
 
     const before = await page.evaluate(() => {
       const g = globalThis.__ORBITAL__;

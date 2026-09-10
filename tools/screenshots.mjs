@@ -38,82 +38,125 @@ const SCENES = [
     setup: () => {
       const g = globalThis.__ORBITAL__;
       g.profile.bestScore = 428;
-      g.profile.seenTutorial = true;
+      g.profile.streak = 5;
+      g.profile.dailyBest = { score: 214, zone: 3, multiplier: 6, perfects: 11, orbs: 24 };
       g.ui.refreshTitle();
       g.world.reset(20260910);
       g.world.jumpTo(30);
     },
   },
   {
-    name: '2-first-run',
-    settle: 3400,
-    setup: () => {
-      const g = globalThis.__ORBITAL__;
-      g.profile.seenTutorial = true;
-      g.profile.skin = 'aurora';
-      g.startRun();
-      g.demo = true;
-      g.world.jumpTo(17);
-    },
-    pose: () => {
-      const g = globalThis.__ORBITAL__;
-      g.world.combo = 9;
-    },
-  },
-  {
-    name: '3-chain',
+    name: '2-safe-or-greed',
     settle: 3200,
     setup: () => {
       const g = globalThis.__ORBITAL__;
-      g.profile.ownedSkins.push('plasma');
-      g.profile.skin = 'plasma';
-      g.world.jumpTo(4 * 14 + 6);
+      g.profile.skin = 'flow';
+      g.startRun({ mode: 'endless', seed: 4242 });
+      g.demo = true;
+      g.world.jumpTo(9);
+    },
+    pose: () => {
+      const g = globalThis.__ORBITAL__;
+      g.world.combo = 11;
+      g.world.shards = 46;
+    },
+  },
+  {
+    name: '3-inferno',
+    settle: 2800,
+    setup: () => {
+      const g = globalThis.__ORBITAL__;
+      g.profile.ownedSkins.push('inferno');
+      g.profile.skin = 'inferno';
+      g.profile.trail = 'sparks';
+      g.profile.ownedTrails.push('sparks');
+      g.world.jumpTo(2 * 14 + 6);
+      g.world._grantPower('shield');
+    },
+    pose: () => {
+      const g = globalThis.__ORBITAL__;
+      g.world.combo = 19;
+      g.world.shards = 188;
+    },
+  },
+  {
+    name: '4-frozen',
+    settle: 2600,
+    setup: () => {
+      const g = globalThis.__ORBITAL__;
+      g.profile.ownedSkins.push('frost');
+      g.profile.skin = 'frost';
+      g.profile.trail = 'prism';
+      g.profile.ownedTrails.push('prism');
+      g.world.jumpTo(3 * 14 + 5);
+    },
+    pose: () => {
+      const g = globalThis.__ORBITAL__;
+      g.world.combo = 27;
+      g.world.shards = 341;
+    },
+  },
+  {
+    name: '5-overdrive',
+    settle: 2800,
+    setup: () => {
+      const g = globalThis.__ORBITAL__;
+      g.profile.ownedSkins.push('storm');
+      g.profile.skin = 'storm';
+      g.profile.trail = 'pulse';
+      g.profile.ownedTrails.push('pulse');
+      g.world.jumpTo(6 * 14 + 6);
       g.world._grantPower('double');
     },
     pose: () => {
       const g = globalThis.__ORBITAL__;
-      g.world.combo = 31;
-      g.world.energy = 214;
+      g.world.combo = 40;
+      g.world.shards = 705;
+      g.world.bestMultiplier = 8;
     },
   },
   {
-    name: '4-storm-zone',
-    settle: 3000,
+    name: '6-void',
+    settle: 2600,
     setup: () => {
       const g = globalThis.__ORBITAL__;
-      g.profile.ownedSkins.push('cobalt');
-      g.profile.skin = 'cobalt';
-      g.world.jumpTo(6 * 14 + 5);
-      g.world._grantPower('shield');
-      g.ui.showZone(6, 0);
+      g.profile.ownedSkins.push('void');
+      g.profile.skin = 'void';
+      g.profile.trail = 'voidline';
+      g.profile.ownedTrails.push('voidline');
+      g.world.jumpTo(7 * 14 + 5);
     },
     pose: () => {
       const g = globalThis.__ORBITAL__;
-      g.world.combo = 22;
-      g.world.energy = 361;
+      g.world.combo = 33;
+      g.world.shards = 902;
     },
   },
   {
-    name: '5-skins',
+    name: '7-shop',
     settle: 900,
     setup: () => {
       const g = globalThis.__ORBITAL__;
       g.demo = false;
-      g.profile.energy = 5200;
-      g.profile.ownedSkins = ['aurora', 'ember', 'orchid', 'lime', 'cobalt', 'solar', 'void'];
-      g.profile.skin = 'solar';
+      g.profile.shards = 5200;
+      g.profile.ownedSkins = ['flow', 'volt', 'inferno', 'frost', 'drift'];
+      g.profile.skin = 'inferno';
       g.toTitle();
+      g.ui.shopTab = 'skin';
       g.ui.show('shop');
     },
   },
   {
-    name: '6-daily',
-    settle: 900,
+    name: '8-daily',
+    settle: 1100,
     setup: () => {
       const g = globalThis.__ORBITAL__;
       g.profile.streak = 5;
-      g.profile.missions.forEach((m, i) => { m.progress = i === 0 ? m.target : Math.floor(m.target * 0.55); });
-      g.ui.show('missions');
+      g.profile.missions.forEach((m, i) => {
+        m.progress = i === 0 ? m.target : Math.floor(m.target * 0.55);
+      });
+      g.profile.dailyBest = { score: 214, zone: 3, multiplier: 6, perfects: 11, orbs: 24 };
+      g.ui.show('daily');
     },
   },
 ];
@@ -163,8 +206,10 @@ async function main() {
       await page.waitForFunction(() => globalThis.__ORBITAL__?.mode === 'attract', null, { timeout: 8000 });
       // Silence is golden in a headless render.
       await page.evaluate(() => {
-        globalThis.__ORBITAL__.profile.music = false;
-        globalThis.__ORBITAL__.profile.sfx = false;
+        const g = globalThis.__ORBITAL__;
+        g.profile.music = false;
+        g.profile.sfx = false;
+        g.profile.tutorialSeen = ['tap', 'perfect', 'orb', 'greed', 'mult'];
       });
 
       for (const scene of SCENES) {

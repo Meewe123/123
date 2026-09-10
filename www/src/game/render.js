@@ -9,7 +9,7 @@
 import { TAU, clamp, lerp, wrap } from '../engine/util.js';
 import { FONT } from '../engine/fx.js';
 import { World } from './world.js';
-import { TUNE, ZONES, skinById, POWERUPS } from './config.js';
+import { TUNE, ZONES, OVERDRIVE_AT, zoneByIndex, skinById, trailById, POWERUPS } from './config.js';
 import { adjustPalette } from './palette.js';
 
 const STAR_COUNT = 130;
@@ -52,6 +52,14 @@ export class Renderer {
     this._skyGradient = null;
     this._skyKey = '';
     this._vignette = null;
+    // 0..1 ramp driven by the multiplier: everything glows a little harder as
+    // the chain grows, and peaks at OVERDRIVE.
+    this.heat = 0;
+    this.overdrive = 0;
+    this.zoneFx = ZONES[0].fx;
+    this.stormNext = 1.4;
+    this.stormFlash = 0;
+    this.clock = 0;
     this.corePulse = 0;
     this.coreSpin = 0;
     this.skyRot = 0;
@@ -131,11 +139,28 @@ export class Renderer {
     return this._targetHex.shield;
   }
 
+  /** The live palette as hex strings — for anything drawing outside the game. */
+  get paletteHex() {
+    return this._targetHex;
+  }
+
   // ---------------------------------------------------------------- draw ---
 
   draw(world, opts) {
-    const { fx, dt, skinId, intensity = 1 } = opts;
+    const {
+      fx, dt, skinId, trailId = 'comet', intensity = 1, ghostAngle = null,
+    } = opts;
     const ctx = this.ctx;
+    const zone = zoneByIndex(world.visualZone);
+    this.zoneFx = zone.fx;
+    this.clock += dt;
+
+    // Multiplier ramp. Damped, never instant, so it reads as the run heating
+    // up rather than as a light switch.
+    const target = (world.multiplier - 1) / (OVERDRIVE_AT - 1);
+    this.heat += (target - this.heat) * (1 - Math.exp(-4 * dt));
+    const odTarget = world.overdrive ? 1 : 0;
+    this.overdrive += (odTarget - this.overdrive) * (1 - Math.exp(-3.5 * dt));
 
     this.corePulse = Math.max(0, this.corePulse - this.corePulse * 5 * dt - 0.2 * dt);
     this.zoneFlash = Math.max(0, this.zoneFlash - dt * 1.6);
@@ -152,7 +177,8 @@ export class Renderer {
     this._drawCore(ctx, world);
     this._drawOrbitGuide(ctx);
     this._drawRings(ctx, world);
-    this._drawPlayer(ctx, world, skinById(skinId));
+    if (ghostAngle !== null) this._drawGhost(ctx, ghostAngle);
+    this._drawPlayer(ctx, world, skinById(skinId), trailById(trailId));
     fx.draw(ctx);
     ctx.restore();
 
@@ -180,16 +206,153 @@ export class Renderer {
     ctx.fillStyle = this._skyGradient;
     ctx.fillRect(0, 0, this.w, this.h);
 
+    this._drawMotes(ctx, intensity);
+    this._drawSkyOverlay(ctx);
+  }
+
+  /**
+   * The ambient layer. Same star pool in every zone — only the motion, shape
+   * and brightness change, so a new atmosphere costs no extra allocation.
+   */
+  _drawMotes(ctx, intensity) {
+    const style = this.zoneFx.motes;
+    if (style === 'none') return;
+    const t = this.clock;
+
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = rgba(this.pal.accent, 1);
+
     for (const s of this.stars) {
-      const a = s.a + this.skyRot * s.depth;
-      const x = this.cx + Math.cos(a) * s.r;
-      const y = this.cy + Math.sin(a) * s.r;
-      const tw = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(this.skyRot * 9 + s.tw));
-      ctx.globalAlpha = 0.10 + 0.30 * s.depth * tw * intensity;
-      ctx.fillRect(x, y, s.size, s.size);
+      let a = s.a + this.skyRot * s.depth;
+      let radius = s.r;
+      let size = s.size;
+      let alpha = 0.10 + 0.30 * s.depth;
+
+      switch (style) {
+        case 'spark': {
+          // VOLTAGE: hard on/off flicker instead of a gentle twinkle.
+          const f = Math.sin(t * 11 + s.tw * 7);
+          alpha *= f > 0.72 ? 2.4 : 0.35;
+          break;
+        }
+        case 'ember':
+          // INFERNO: embers rise away from the core and fade as they go.
+          radius += ((t * 26 * s.depth) + s.tw * 90) % 220;
+          alpha *= Math.max(0, 1 - ((radius - s.r) / 220)) * 1.4;
+          size *= 1.2;
+          break;
+        case 'frost':
+          // FROZEN: still, cold flecks that barely breathe.
+          alpha *= 0.55 + 0.45 * Math.sin(t * 1.6 + s.tw);
+          size *= 0.85;
+          break;
+        case 'wisp':
+          // GHOST: slow lateral smear.
+          a += Math.sin(t * 0.7 + s.tw) * 0.09;
+          alpha *= 0.5 + 0.5 * Math.sin(t * 1.1 + s.tw * 3);
+          size *= 1.6;
+          break;
+        case 'rain':
+          // STORM: streaks driven inward, fast.
+          radius = s.r - ((t * 320 * s.depth + s.tw * 200) % 360);
+          if (radius < 0) radius += 360;
+          size *= 0.8;
+          alpha *= 1.3;
+          break;
+        default:
+          alpha *= 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(this.skyRot * 9 + s.tw));
+          break;
+      }
+
+      const x = this.cx + Math.cos(a) * radius;
+      const y = this.cy + Math.sin(a) * radius;
+      ctx.globalAlpha = Math.min(0.85, alpha * intensity);
+      if (style === 'rain' || style === 'wisp') {
+        ctx.fillRect(x, y, size, size * (style === 'rain' ? 4 : 2.4));
+      } else {
+        ctx.fillRect(x, y, size, size);
+      }
+    }
+    ctx.restore();
+  }
+
+  /** One extra pass per zone, at most. Never over the play area's mid-band. */
+  _drawSkyOverlay(ctx) {
+    const style = this.zoneFx.sky;
+    if (this.reduced || style === 'calm') return;
+    const t = this.clock;
+
+    if (style === 'storm') {
+      // Lightning: a brief wash across the whole frame, well under the
+      // brightness of a ring so nothing is ever hidden behind it.
+      this.stormNext -= 1 / 60;
+      if (this.stormNext <= 0) {
+        this.stormFlash = 0.13;
+        this.stormNext = 1.1 + (Math.sin(t * 7.3) * 0.5 + 0.5) * 2.2;
+      }
+      if (this.stormFlash > 0) {
+        this.stormFlash = Math.max(0, this.stormFlash - 1 / 60);
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = this.stormFlash * 0.55;
+        ctx.fillStyle = rgba(this.pal.ring, 1);
+        ctx.fillRect(0, 0, this.w, this.h);
+        ctx.restore();
+      }
+      return;
+    }
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    if (style === 'volt') {
+      // A scanline that jitters down the screen.
+      const y = ((t * 140) % (this.h + 120)) - 60;
+      ctx.globalAlpha = 0.07;
+      ctx.fillStyle = rgba(this.pal.ring, 1);
+      ctx.fillRect(0, y, this.w, 2);
+    } else if (style === 'heat') {
+      ctx.globalAlpha = 0.05 + 0.03 * Math.sin(t * 2.1);
+      ctx.fillStyle = rgba(this.pal.ring, 1);
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, this.unit * (0.9 + 0.08 * Math.sin(t * 1.7)), 0, TAU);
+      ctx.fill();
+    } else if (style === 'glass') {
+      // Faint facets, drawn outside the play area only.
+      ctx.globalAlpha = 0.10;
+      ctx.strokeStyle = rgba(this.pal.ring, 1);
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 6; i++) {
+        const a = t * 0.05 + (TAU / 6) * i;
+        ctx.beginPath();
+        ctx.moveTo(this.cx + Math.cos(a) * this.unit * 1.05, this.cy + Math.sin(a) * this.unit * 1.05);
+        ctx.lineTo(this.cx + Math.cos(a + 0.5) * this.unit * 1.9, this.cy + Math.sin(a + 0.5) * this.unit * 1.9);
+        ctx.stroke();
+      }
+    } else if (style === 'warp') {
+      ctx.globalAlpha = 0.06;
+      ctx.strokeStyle = rgba(this.pal.accent, 1);
+      ctx.lineWidth = 1.5;
+      for (let i = 1; i <= 3; i++) {
+        ctx.beginPath();
+        ctx.ellipse(
+          this.cx, this.cy,
+          this.unit * (0.95 + i * 0.22) * (1 + 0.05 * Math.sin(t * 1.3 + i)),
+          this.unit * (0.95 + i * 0.22) * (1 - 0.05 * Math.sin(t * 1.3 + i)),
+          t * 0.12, 0, TAU,
+        );
+        ctx.stroke();
+      }
+    } else if (style === 'ghost') {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.10 + 0.05 * Math.sin(t * 0.8);
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, this.w, this.h);
+    } else if (style === 'void') {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, this.w, this.h);
     }
     ctx.restore();
   }
@@ -369,7 +532,7 @@ export class Renderer {
       const a = ring.rot + World.gapCenterAt(ring, orb.gapIndex, ring.travel) + orb.offset;
       const x = this.cx + Math.cos(a) * radius;
       const y = this.cy + Math.sin(a) * radius;
-      const isPower = orb.type !== 'energy';
+      const isPower = orb.type !== 'shard';
       const color = isPower
         ? (orb.type === 'shield' ? this.shieldColor : POWERUPS[orb.type].color)
         : `rgb(${this.pal.orb.join(',')})`;
@@ -417,7 +580,7 @@ export class Renderer {
     }
   }
 
-  _drawPlayer(ctx, world, skin) {
+  _drawPlayer(ctx, world, skin, trail) {
     const u = this.unit;
     const orbit = TUNE.playerOrbit * u;
     const a = world.player.angle;
@@ -431,24 +594,8 @@ export class Renderer {
     this.trail.push({ x, y });
     while (this.trail.length > TRAIL_LEN) this.trail.shift();
 
-    // Trail — sized off the body's thickness so it reads as a wake, not as the
-    // player itself.
     if (!this.reduced && this.trail.length > 2) {
-      const rR = r * flatten;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      for (let pass = 0; pass < 2; pass++) {
-        ctx.beginPath();
-        ctx.moveTo(this.trail[0].x, this.trail[0].y);
-        for (let i = 1; i < this.trail.length; i++) ctx.lineTo(this.trail[i].x, this.trail[i].y);
-        ctx.strokeStyle = skin.trail;
-        ctx.globalAlpha = pass === 0 ? 0.13 : 0.32;
-        ctx.lineWidth = pass === 0 ? rR * 2.0 : rR * 0.8;
-        ctx.stroke();
-      }
-      ctx.restore();
+      this._drawTrail(ctx, trail.style, skin, r * flatten);
     }
 
     // The arm back to the core makes the player's angle instantly readable.
@@ -465,18 +612,40 @@ export class Renderer {
     const sinceFlip = world.time - world.player.flipAt;
     const squash = 1 + Math.exp(-sinceFlip * 14) * 0.42;
 
+    // The halo grows with the chain: at x1 it is a soft edge, at OVERDRIVE it
+    // is the brightest thing on screen that is not a ring.
+    const halo = r * (3.0 + this.heat * 1.6);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.2);
+    const g = ctx.createRadialGradient(x, y, 0, x, y, halo);
     g.addColorStop(0, skin.glow);
     g.addColorStop(0.22, skin.glow);
     g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.globalAlpha = 0.55;
+    ctx.globalAlpha = 0.45 + this.heat * 0.28;
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(x, y, r * 3.2, 0, TAU);
+    ctx.arc(x, y, halo, 0, TAU);
     ctx.fill();
     ctx.restore();
+
+    // OVERDRIVE: a counter-rotating pair of arcs, and nothing else. It has to
+    // read at a glance without competing with the rings for attention.
+    if (this.overdrive > 0.02) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = this.overdrive * 0.85;
+      ctx.strokeStyle = skin.core;
+      ctx.lineWidth = Math.max(1.2, r * 0.14);
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 2; i++) {
+        const spin = this.clock * (i ? -3.4 : 4.2) + i * Math.PI;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * (2.0 + i * 0.5), spin, spin + 1.5);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     ctx.save();
     ctx.translate(x, y);
@@ -527,6 +696,103 @@ export class Renderer {
       ctx.fill();
       ctx.restore();
     }
+  }
+
+  /**
+   * Trail cosmetics. Every style walks the same recorded points, so they all
+   * cost the same and none of them allocates.
+   */
+  _drawTrail(ctx, style, skin, width) {
+    const pts = this.trail;
+    const boost = 1 + this.heat * 0.5;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const stroke = (color, alpha, w, offset = 0) => {
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const q = pts[Math.min(i + 1, pts.length - 1)];
+        const nx = offset ? -(q.y - p.y) : 0;
+        const ny = offset ? (q.x - p.x) : 0;
+        const len = offset ? Math.hypot(nx, ny) || 1 : 1;
+        const px = p.x + (nx / len) * offset;
+        const py = p.y + (ny / len) * offset;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = Math.max(0.8, w);
+      ctx.stroke();
+    };
+
+    switch (style) {
+      case 'ribbon':
+        stroke(skin.trail, 0.55 * boost, width * 0.7);
+        break;
+      case 'sparks':
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = skin.trail;
+        for (let i = pts.length - 1; i >= 0; i -= 2) {
+          const k = i / pts.length;
+          ctx.globalAlpha = k * 0.6 * boost;
+          const sz = width * 0.5 * k;
+          ctx.fillRect(pts[i].x - sz / 2, pts[i].y - sz / 2, sz, sz);
+        }
+        break;
+      case 'prism':
+        stroke(skin.trail, 0.30 * boost, width * 0.6, width * 0.9);
+        stroke(skin.glow, 0.30 * boost, width * 0.6, -width * 0.9);
+        stroke(skin.core, 0.40 * boost, width * 0.45);
+        break;
+      case 'pulse': {
+        const beat = 0.75 + 0.25 * Math.sin(this.clock * (6 + this.heat * 10));
+        stroke(skin.trail, 0.16 * boost, width * 2.1 * beat);
+        stroke(skin.core, 0.42 * boost, width * 0.7 * beat);
+        break;
+      }
+      case 'voidline':
+        ctx.globalCompositeOperation = 'source-over';
+        stroke('#05070e', 0.85, width * 1.5);
+        ctx.globalCompositeOperation = 'lighter';
+        stroke(skin.glow, 0.45 * boost, width * 0.35);
+        break;
+      default: // comet
+        stroke(skin.trail, 0.13 * boost, width * 2.0);
+        stroke(skin.trail, 0.32 * boost, width * 0.8);
+        break;
+    }
+    ctx.restore();
+  }
+
+  /**
+   * The personal-best ghost: an outline where you were on your best run.
+   * Drawn hollow and dim so it can never be confused with the live player, and
+   * it takes no part in collision.
+   */
+  _drawGhost(ctx, angle) {
+    const u = this.unit;
+    const orbit = TUNE.playerOrbit * u;
+    const x = this.cx + Math.cos(angle) * orbit;
+    const y = this.cy + Math.sin(angle) * orbit;
+    const r = TUNE.playerTangential * u;
+    const flatten = TUNE.playerRadial / TUNE.playerTangential;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle + Math.PI / 2);
+    ctx.scale(1, flatten);
+    ctx.globalAlpha = 0.34;
+    ctx.strokeStyle = rgba(this.pal.accent, 1);
+    ctx.lineWidth = Math.max(1, r * 0.16);
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.95, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
   }
 
   _shapePath(ctx, shape, r) {

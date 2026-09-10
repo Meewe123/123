@@ -1,12 +1,15 @@
 /**
  * Orbital Rush — application entry point.
  *
- * Wires the simulation, renderer, audio, haptics, input, persistence and UI
- * together and owns the game's state machine:
+ * Wires the simulation, renderer, audio, haptics, input, persistence, the meta
+ * services and the UI together, and owns the game's state machine:
  *
  *     attract  <->  play  <->  paused
  *                    |
- *                  dying  ->  over  ->  (revive -> play | restart | attract)
+ *                  dying  ->  over  ->  (revive -> play | retry | attract)
+ *
+ * Everything that decides a score lives in the simulation; this file only
+ * observes it, feeds the presentation layer and persists the result.
  */
 
 import { Loop } from './engine/loop.js';
@@ -14,24 +17,32 @@ import { Input } from './engine/input.js';
 import { AudioEngine } from './engine/audio.js';
 import { Haptics } from './engine/haptics.js';
 import { Fx } from './engine/fx.js';
-import { clamp } from './engine/util.js';
+import { clamp, commas, todayKey } from './engine/util.js';
 import * as store from './engine/storage.js';
 
 import { World, EVT } from './game/world.js';
 import { Renderer } from './game/render.js';
 import { createAutopilot, stepAutopilot } from './game/autopilot.js';
-import { TUNE, ZONES, POWERUPS, skinById } from './game/config.js';
+import { TUNE, POWERUPS, OVERDRIVE_AT, zoneByIndex, skinById } from './game/config.js';
 import { adjustPalette } from './game/palette.js';
+import { playPerfect, playOverdrive } from './game/effects.js';
+import { GhostRecorder, GhostPlayer, bestGhost } from './game/ghost.js';
+import * as daily from './game/daily.js';
+import * as achievements from './game/achievements.js';
 import * as meta from './game/meta.js';
 
-import { UI } from './ui/ui.js';
+import { LocalStore, LeaderboardService, DailyLeaderboardService } from './services/leaderboard.js';
+import { PurchaseService } from './services/purchase.js';
+import { ChallengeService, encodeChallenge } from './services/challenge.js';
 
-const DEATH_HOLD = 1.05;
+import { UI } from './ui/ui.js';
+import { shareRun } from './ui/sharecard.js';
 
 class Game {
   constructor() {
     this.profile = store.load();
     this.mode = 'boot';
+    this.runMode = 'endless';
 
     this.canvas = document.getElementById('stage');
     this.renderer = new Renderer(this.canvas);
@@ -41,7 +52,19 @@ class Game {
     this.world = new World((Math.random() * 0xffffffff) >>> 0);
     this.autopilot = createAutopilot({ greedy: true, sloppiness: 0.05 });
 
+    this.recorder = new GhostRecorder();
+    this.ghost = new GhostPlayer(null);
+    this.ghostTimer = 0;
+
+    this.store = new LocalStore(this.profile);
+    this.leaderboard = new LeaderboardService(this.store);
+    this.dailyBoard = new DailyLeaderboardService(this.store, todayKey());
+    this.purchases = new PurchaseService();
+    this.challenges = new ChallengeService();
+    this.challenge = null;
+
     this.deathTimer = 0;
+    this.hitStop = 0;
     this.runCommitted = null;
     this.pendingResult = null;
     this.audioUnlocked = false;
@@ -66,10 +89,17 @@ class Game {
 
   async boot() {
     this.profile = await store.hydrateFromNative(this.profile);
+    this.store.profile = this.profile;
     this.ui.setProfile(this.profile);
+
     meta.ensureDaily(this.profile);
+    daily.ensureDaily(this.profile);
+    meta.syncAchievementCosmetics(this.profile);
     this._applySettings();
     store.saveSoon(this.profile);
+
+    this.challenge = this.challenges.incoming();
+    if (this.challenge) this.challenges.clear();
 
     this.haptics.init();
     this.mode = 'attract';
@@ -77,25 +107,24 @@ class Game {
     this.ui.setTheme(this._theme(0));
     this.loop.start();
     this._hideNativeSplash();
+
+    if (this.challenge) {
+      this.ui.toast(`CHALLENGE · BEAT ${commas(this.challenge.score)}`, 2600);
+    }
   }
 
   _handlers() {
     return {
-      onPlay: () => this.startRun(),
-      onTutorialDone: () => {
-        this.profile.seenTutorial = true;
-        store.saveSoon(this.profile);
-        this.startRun(true);
-      },
+      onPlay: () => this.startRun({ mode: 'endless' }),
+      onDaily: () => this.startRun({ mode: 'daily' }),
       onPause: () => this.pause(),
       onResume: () => this.resume(),
-      onRestart: () => this.startRun(),
+      onRestart: () => this.startRun({ mode: this.runMode }),
       onQuit: () => this.toTitle(),
       onRevive: () => this.revive(),
       onShare: () => this.share(),
-      onSkin: (id) => this.buySkin(id),
+      onCosmetic: (kind, id) => this.chooseCosmetic(kind, id),
       onClaimMission: (m) => this.claimMission(m),
-      onClaimDaily: () => this.claimDaily(),
       onToggle: (key, value) => this.toggleSetting(key, value),
       onReset: () => this.resetProgress(),
       onUiSound: () => {
@@ -108,8 +137,13 @@ class Game {
       },
       claimableCount: () => meta.claimableCount(this.profile),
       hasShopNews: () => !!meta.nextUnlockable(this.profile),
-      dailyAvailable: () => meta.dailyRewardAvailable(this.profile),
-      dailyAmount: () => meta.dailyRewardAmount(this.profile),
+      dailyAvailable: () => daily.dailyAvailable(this.profile),
+      dailyInfo: () => ({
+        label: daily.dailyLabel(todayKey()),
+        date: new Date().toDateString().toUpperCase(),
+      }),
+      dailyBoardLabel: () => this.dailyBoard.label,
+      dailyBoard: () => this.dailyBoard.top(5),
     };
   }
 
@@ -138,7 +172,6 @@ class Game {
       if (this.mode === 'play') this.pause();
     });
 
-    // Android hardware back button, when running inside the native shell.
     const cap = globalThis.Capacitor;
     if (cap?.Plugins?.App) {
       cap.Plugins.App.addListener('backButton', () => {
@@ -149,8 +182,7 @@ class Game {
   }
 
   _hideNativeSplash() {
-    const splash = globalThis.Capacitor?.Plugins?.SplashScreen;
-    if (splash) splash.hide({ fadeOutDuration: 260 }).catch(() => {});
+    globalThis.Capacitor?.Plugins?.SplashScreen?.hide({ fadeOutDuration: 260 }).catch(() => {});
   }
 
   _unlockAudio() {
@@ -163,7 +195,7 @@ class Game {
 
   /** The zone palette, nudged clear of whatever skin is equipped. */
   _theme(zoneIndex = this.world.visualZone) {
-    return adjustPalette(ZONES[zoneIndex % ZONES.length].palette, skinById(this.profile.skin));
+    return adjustPalette(zoneByIndex(zoneIndex).palette, skinById(this.profile.skin));
   }
 
   _applySettings() {
@@ -174,29 +206,58 @@ class Game {
     this.renderer.setReduced(!!this.profile.reducedFx);
   }
 
+  _applyZone(zoneIndex) {
+    const zone = zoneByIndex(zoneIndex);
+    this.audio.setKey(zone.key);
+    this.audio.setVoice(zone.voice);
+    this.ui.setTheme(this._theme(zoneIndex));
+  }
+
   // ------------------------------------------------------------------ flow ---
 
-  startRun(skipTutorial = false) {
+  startRun({ mode = 'endless', seed = null } = {}) {
     this._unlockAudio();
-    if (!this.profile.seenTutorial && !skipTutorial) {
-      this.ui.show('tutorial');
-      return;
-    }
+    this.runMode = mode;
 
     meta.ensureDaily(this.profile);
-    meta.registerPlay(this.profile);
+    daily.ensureDaily(this.profile);
+    // First run of the day: the streak advances and the daily bonus is simply
+    // handed over. No pop-up, no button to hunt for, no reason to feel behind.
+    if (meta.registerPlay(this.profile)) {
+      const bonus = meta.claimDailyReward(this.profile);
+      if (bonus) this.ui.toast(`DAY ${this.profile.streak} · +${bonus} ◈`, 2200);
+    }
+    for (const milestone of meta.claimStreakMilestones(this.profile)) {
+      this.ui.toast(`${milestone.name.toUpperCase()} · +${milestone.reward} ◈`, 2400);
+    }
 
-    this.world.reset((Math.random() * 0xffffffff) >>> 0);
+    let runSeed = seed;
+    if (runSeed === null) {
+      if (mode === 'daily') runSeed = daily.dailySeedFor();
+      else if (this.challenge && this.challenge.mode === 'endless') runSeed = this.challenge.seed;
+      else runSeed = (Math.random() * 0xffffffff) >>> 0;
+    }
+
+    this.world.reset(runSeed);
     this.autopilot = createAutopilot({ greedy: true, sloppiness: 0.05 });
+    this.recorder.reset();
+    // The ghost only paces an endless run: a daily is about today's seed.
+    this.ghost = new GhostPlayer(mode === 'endless' ? this.profile.ghost : null);
+    this.ghostTimer = 0;
     this.fx.clear();
     this.renderer.resetRun();
-    this.runCommitted = { score: 0, energy: 0, orbs: 0, perfects: 0, timeMs: 0, counted: false };
+    this.runCommitted = {
+      score: 0, shards: 0, orbs: 0, greedOrbs: 0, perfects: 0, timeMs: 0, counted: false,
+    };
     this.pendingResult = null;
     this.deathTimer = 0;
+    this.hitStop = 0;
     this.mode = 'play';
     this.ui.resetHud();
     this.ui.showGame();
-    this.audio.setKey(ZONES[0].key);
+    this._applyZone(0);
+    if (mode === 'daily') this.ui.toast(`DAILY ${daily.dailyLabel(todayKey())}`, 1600);
+    this._coach('tap', 'TAP TO FLIP ORBIT');
     store.saveSoon(this.profile);
   }
 
@@ -205,7 +266,7 @@ class Game {
     this.mode = 'paused';
     this.ui.showPause({
       score: this.world.score,
-      energy: this.world.energy,
+      multiplier: this.world.multiplier,
       zone: this.world.zone,
       lap: this.world.lap,
     });
@@ -224,6 +285,7 @@ class Game {
     this.mode = 'attract';
     this.world.reset((Math.random() * 0xffffffff) >>> 0);
     this.autopilot = createAutopilot({ greedy: true, sloppiness: 0.05 });
+    this.ghost = new GhostPlayer(null);
     this.fx.clear();
     this.renderer.resetRun();
     this.ui.show('title');
@@ -231,25 +293,36 @@ class Game {
 
   _die() {
     this.mode = 'dying';
-    this.deathTimer = DEATH_HOLD;
+    this.deathTimer = TUNE.deathHold;
   }
 
   _finishDeath() {
-    const isBest = this._commitRun();
+    const outcome = this._commitRun();
     const w = this.world;
     this.mode = 'over';
     this.pendingResult = {
+      mode: this.runMode,
       score: w.score,
-      energy: w.energy,
-      bestCombo: w.bestCombo,
+      shards: w.shards,
+      orbs: w.orbsCollected,
+      greedOrbs: w.greedOrbs,
+      safeOrbs: w.safeOrbs,
+      perfects: w.perfects,
+      bestMultiplier: w.bestMultiplier,
+      bestChain: w.bestChain,
       zoneReached: w.zone,
       lap: w.lap,
-      isBest,
-      canRevive: w.revivesUsed < 1 && this.profile.energy >= TUNE.reviveCost,
+      seed: w.seed,
+      isBest: outcome.isBest,
+      isZoneBest: outcome.isZoneBest,
+      isMultBest: outcome.isMultBest,
+      canRevive: w.revivesUsed < 1
+        && this.runMode === 'endless'
+        && this.profile.shards >= TUNE.reviveCost,
     };
     this.ui.setProfile(this.profile);
-    this.ui.showGameOver(this.pendingResult);
-    if (isBest) {
+    this.ui.showRunSummary(this.pendingResult);
+    if (outcome.isBest) {
       this.haptics.fire('success');
       this.audio.play('unlock');
     }
@@ -262,46 +335,88 @@ class Game {
   _commitRun() {
     const w = this.world;
     const c = this.runCommitted;
-    if (!c) return false;
+    if (!c) return { isBest: false, isZoneBest: false, isMultBest: false };
+
+    const beforeZone = this.profile.bestZone;
+    const beforeMult = this.profile.bestMultiplier;
 
     const run = {
       score: w.score,
       rings: w.score - c.score,
-      energy: w.energy - c.energy,
+      shards: w.shards - c.shards,
       orbs: w.orbsCollected - c.orbs,
+      greedOrbs: w.greedOrbs - c.greedOrbs,
       perfects: w.perfects - c.perfects,
-      bestCombo: w.bestCombo,
+      bestChain: w.bestChain,
+      bestMultiplier: w.bestMultiplier,
       zoneReached: w.zone,
-      lap: w.lap,
+      noShieldZone: w.noShieldZone,
       timeMs: w.time * 1000 - c.timeMs,
       countRun: !c.counted,
+      isBest: w.score > this.profile.bestScore,
     };
 
     const isBest = meta.commitRun(this.profile, run);
+    const isZoneBest = this.profile.bestZone > beforeZone;
+    const isMultBest = this.profile.bestMultiplier > beforeMult;
+
     const done = meta.applyRun(this.profile, run);
+    const earned = achievements.evaluate(this.profile);
+    meta.syncAchievementCosmetics(this.profile);
+
+    if (this.runMode === 'daily') {
+      daily.recordDaily(this.profile, {
+        score: w.score,
+        zoneReached: w.zone,
+        bestMultiplier: w.bestMultiplier,
+        perfects: w.perfects,
+        orbs: w.orbsCollected,
+      });
+    }
+
+    const entry = {
+      score: w.score,
+      zone: w.zone,
+      multiplier: w.bestMultiplier,
+      perfects: w.perfects,
+      orbs: w.orbsCollected,
+      seed: w.seed,
+      date: todayKey(),
+    };
+    const board = this.runMode === 'daily' ? this.dailyBoard : this.leaderboard;
+    board.submit(entry).catch(() => {});
+
+    // The ghost is the best endless run, kept for the next attempt to chase.
+    if (this.runMode === 'endless') {
+      const recorded = this.recorder.toData({ score: w.score, seed: w.seed, mode: 'endless' });
+      this.profile.ghost = bestGhost(this.profile.ghost, recorded);
+    }
 
     c.score = w.score;
-    c.energy = w.energy;
+    c.shards = w.shards;
     c.orbs = w.orbsCollected;
+    c.greedOrbs = w.greedOrbs;
     c.perfects = w.perfects;
     c.timeMs = w.time * 1000;
     c.counted = true;
 
-    if (done.length) {
+    if (earned.length) {
+      this.ui.toast(`${earned[0].name.toUpperCase()} · +${earned[0].reward} ◈`, 2400);
+    } else if (done.length) {
       this.ui.toast(done.length === 1 ? 'MISSION COMPLETE' : `${done.length} MISSIONS COMPLETE`);
     }
     store.flush(this.profile);
-    return isBest;
+    return { isBest, isZoneBest, isMultBest };
   }
 
   revive() {
-    if (this.mode !== 'over') return;
-    if (this.world.revivesUsed >= 1 || this.profile.energy < TUNE.reviveCost) {
-      this.ui.toast('NOT ENOUGH ENERGY');
+    if (this.mode !== 'over' || this.runMode !== 'endless') return;
+    if (this.world.revivesUsed >= 1 || this.profile.shards < TUNE.reviveCost) {
+      this.ui.toast('NOT ENOUGH SHARDS');
       this.audio.play('deny');
       return;
     }
-    this.profile.energy -= TUNE.reviveCost;
+    meta.spendShards(this.profile, TUNE.reviveCost);
     store.saveSoon(this.profile);
     this.world.revive();
     this.fx.clear();
@@ -316,43 +431,64 @@ class Game {
     this.loop.resync();
   }
 
-  share() {
-    const score = this.pendingResult?.score ?? this.profile.bestScore;
-    const text = `I threaded ${score} rings in Orbital Rush. Beat that.`;
-    if (navigator.share) {
-      navigator.share({ title: 'Orbital Rush', text }).catch(() => {});
-    } else if (navigator.clipboard) {
-      navigator.clipboard.writeText(text).then(
-        () => this.ui.toast('COPIED TO CLIPBOARD'),
-        () => this.ui.toast('COULD NOT SHARE'),
-      );
-    } else {
-      this.ui.toast('SHARING UNAVAILABLE');
-    }
+  async share() {
+    const result = this.pendingResult;
+    if (!result) return;
+    const code = encodeChallenge({ mode: result.mode, seed: result.seed, score: result.score });
+    const link = this.challenges.link({ mode: result.mode, seed: result.seed, score: result.score });
+    const text = `I threaded ${commas(result.score)} rings in Orbital Rush — zone ${result.zoneReached + 1}, x${result.bestMultiplier}. Beat that.`;
+    const outcome = await shareRun(
+      { ...result, code },
+      this.renderer.paletteHex,
+      skinById(this.profile.skin),
+      text,
+      link,
+    );
+    if (outcome === 'clipboard') this.ui.toast('COPIED TO CLIPBOARD');
+    else if (outcome === 'unavailable') this.ui.toast('SHARING UNAVAILABLE');
   }
 
   // ------------------------------------------------------------------ meta ---
 
-  buySkin(id) {
-    const result = meta.buyOrEquip(this.profile, id);
+  async chooseCosmetic(kind, id) {
+    const result = meta.buyOrEquip(this.profile, kind, id);
+    const item = meta.itemOf(kind, id);
+
     if (result === 'poor') {
       this.audio.play('deny');
       this.haptics.fire('warning');
-      this.ui.toast('NOT ENOUGH ENERGY');
-      return;
-    }
-    if (result === 'bought') {
+      this.ui.toast('NOT ENOUGH SHARDS');
+    } else if (result === 'achievement') {
+      this.audio.play('deny');
+      this.ui.toast('EARN IT — SEE ACHIEVEMENTS');
+    } else if (result === 'premium') {
+      if (!this.purchases.available) {
+        this.audio.play('deny');
+        this.ui.toast('PURCHASES UNAVAILABLE ON THIS BUILD');
+      } else {
+        const purchase = await this.purchases.purchase(item.sku);
+        if (purchase.ok) {
+          meta.grantCosmetic(this.profile, kind, id);
+          meta.equipCosmetic(this.profile, kind, id);
+          this.audio.play('unlock');
+          this.ui.toast(`${item.name.toUpperCase()} UNLOCKED`);
+        } else {
+          this.ui.toast('PURCHASE NOT COMPLETED');
+        }
+      }
+    } else if (result === 'bought') {
       this.audio.play('unlock');
       this.haptics.fire('success');
-      this.ui.toast(`${skinById(id).name.toUpperCase()} UNLOCKED`);
+      this.ui.toast(`${item.name.toUpperCase()} UNLOCKED`);
     } else if (result === 'equipped') {
       this.audio.play('ui');
       this.haptics.fire('light');
     }
+
     store.flush(this.profile);
-    // A new skin changes what the rest of the palette has to contrast with.
     this.ui.setTheme(this._theme());
     this.ui.refreshShop();
+    this.ui.refreshCollection();
     this.ui.refreshTitle();
   }
 
@@ -361,20 +497,10 @@ class Game {
     if (!reward) return;
     this.audio.play('power');
     this.haptics.fire('success');
-    this.ui.toast(`+${reward} ENERGY`);
+    this.ui.toast(`+${reward} ◈`);
     store.flush(this.profile);
-    this.ui.refreshMissions();
-    this.ui.refreshTitle();
-  }
-
-  claimDaily() {
-    const amount = meta.claimDailyReward(this.profile);
-    if (!amount) return;
-    this.audio.play('unlock');
-    this.haptics.fire('success');
-    this.ui.toast(`DAILY BONUS +${amount}`);
-    store.flush(this.profile);
-    this.ui.refreshMissions();
+    if (this.ui.current === 'over') this.ui.showRunSummary(this.pendingResult);
+    else if (this.ui.current === 'daily') this.ui.refreshDaily();
     this.ui.refreshTitle();
   }
 
@@ -388,15 +514,26 @@ class Game {
   }
 
   resetProgress() {
-    if (!window.confirm('Erase your best score, energy and unlocked skins?')) return;
-    this.profile = { ...store.DEFAULT_PROFILE, ownedSkins: ['aurora'], missions: [] };
+    if (!window.confirm('Erase your records, shards and everything you have unlocked?')) return;
+    this.profile = store.migrate(null);
+    this.store.profile = this.profile;
     meta.ensureDaily(this.profile);
+    daily.ensureDaily(this.profile);
     store.flush(this.profile);
     this.ui.setProfile(this.profile);
     this._applySettings();
     this.ui.refreshSettings();
     this.ui.refreshTitle();
     this.ui.toast('PROGRESS RESET');
+  }
+
+  /** Show a coaching line once in the player's life, then never again. */
+  _coach(id, text) {
+    const seen = this.profile.tutorialSeen || (this.profile.tutorialSeen = []);
+    if (seen.includes(id)) return;
+    seen.push(id);
+    this.ui.coach(text);
+    store.saveSoon(this.profile);
   }
 
   // ----------------------------------------------------------------- input ---
@@ -419,9 +556,16 @@ class Game {
         this.renderer.resetRun();
       }
     } else if (this.mode === 'play') {
-      // `demo` is set only by the automated screenshot/e2e harness.
-      if (this.demo) stepAutopilot(this.world, this.autopilot);
-      this.world.update(dt);
+      // A PERFECT stops the world for a couple of frames. The simulation only
+      // ever advances in whole steps, so freezing it changes nothing about
+      // what the rings do — only when they do it.
+      if (this.hitStop > 0) {
+        this.hitStop -= dt;
+      } else {
+        if (this.demo) stepAutopilot(this.world, this.autopilot);
+        this.world.update(dt);
+        this.recorder.sample(this.world);
+      }
     } else if (this.mode === 'dying') {
       this.deathTimer -= dt;
       if (this.deathTimer <= 0) this._finishDeath();
@@ -430,27 +574,45 @@ class Game {
     this.world.drainEvents((e) => this._onEvent(e));
     this.fx.update(dt);
 
-    if (this.mode === 'play') {
-      const w = this.world;
-      this.ui.setScore(w.score);
-      this.ui.setRunEnergy(w.energy);
-      this.ui.setMultiplier(w.multiplier);
-      this.ui.setPowers({
-        shield: w.shieldCharges,
-        shieldColor: this.renderer.shieldColor,
-        slow: w.slowTimer,
-        double: w.doubleTimer,
-      });
-      this.audio.setIntensity(clamp(w.difficulty * 0.75 + Math.min(w.combo / 18, 1) * 0.3, 0.15, 1));
+    if (this.mode === 'play') this._syncHud(dt);
+  }
+
+  _syncHud(dt) {
+    const w = this.world;
+    this.ui.setScore(w.score);
+    this.ui.setRunShards(w.shards);
+    const step = TUNE.comboPerMultiplier;
+    this.ui.setMultiplier(w.multiplier, (w.combo % step) / step);
+    this.ui.setPowers({
+      shield: w.shieldCharges,
+      shieldColor: this.renderer.shieldColor,
+      slow: w.slowTimer,
+      double: w.doubleTimer,
+    });
+    this.audio.setIntensity(clamp(
+      w.difficulty * 0.6 + ((w.multiplier - 1) / (OVERDRIVE_AT - 1)) * 0.45, 0.15, 1,
+    ));
+
+    this.ghostTimer -= dt;
+    if (this.ghostTimer <= 0) {
+      this.ghostTimer = 0.25;
+      if (this.ghost.available && this.ghost.angleAt(w.time) !== null) {
+        this.ui.setGhost({ delta: w.score - this.ghost.scoreAt(w.time) });
+      } else {
+        this.ui.setGhost(null);
+      }
     }
   }
 
   render(frameDt) {
     const dt = Math.min(frameDt, 0.05);
+    const showGhost = this.mode === 'play' && this.ghost.available;
     this.renderer.draw(this.world, {
       fx: this.fx,
       dt,
       skinId: this.profile.skin,
+      trailId: this.profile.trail,
+      ghostAngle: showGhost ? this.ghost.angleAt(this.world.time) : null,
       intensity: this.mode === 'play' ? 1 : 0.75,
     });
   }
@@ -461,6 +623,7 @@ class Game {
     const quiet = this.mode === 'attract';
     const r = this.renderer;
     const skin = skinById(this.profile.skin);
+    const zone = zoneByIndex(this.world.visualZone);
 
     switch (e.type) {
       case EVT.FLIP: {
@@ -478,8 +641,6 @@ class Game {
       case EVT.PASS: {
         const p = r.orbitPoint(e.angle);
         r.onPass(0.7 + e.precision * 0.6);
-        // Sparks at the point of the pass, not a ring-shaped ripple: a full
-        // circle at the orbit radius reads as a wall with no way through.
         this.fx.burst(p.x, p.y, 10, {
           color: [skin.trail, skin.glow], speed: 190, size: r.unit * 0.008, life: 0.4,
           shape: 'spark', angle: e.angle, spread: Math.PI * 1.2,
@@ -492,39 +653,80 @@ class Game {
       }
 
       case EVT.PERFECT: {
-        const p = r.orbitPoint(e.angle);
-        this.fx.burst(p.x, p.y, 14, {
-          color: ['#ffffff', '#ffd23f'], speed: 210, size: r.unit * 0.009, life: 0.5, shape: 'spark',
+        const effectId = this.profile.effect === 'zone' ? zone.fx.perfect : this.profile.effect;
+        playPerfect(this.fx, r, {
+          kind: effectId,
+          angle: e.angle,
+          dir: this.world.player.dir,
+          color: skin.glow,
+          accent: zone.palette.accent,
         });
         if (!quiet) {
           const label = r.orbitPoint(e.angle, TUNE.playerOrbit + 0.20);
           this.fx.text(label.x, label.y, 'PERFECT', {
             color: '#ffd23f', size: Math.round(r.unit * 0.075), life: 0.75,
           });
-        }
-        this.fx.addShake(3.5);
-        if (!quiet) {
+          this.fx.addShake(3.5 * (zone.fx.shake || 1));
           this.audio.play('perfect');
           this.haptics.fire('medium');
+          this.hitStop = TUNE.hitStopSeconds;
+          this._coach('perfect', 'PERFECT — DEAD CENTRE');
         }
         break;
       }
 
       case EVT.ORB: {
         const p = r.orbitPoint(e.angle);
-        this.fx.burst(p.x, p.y, 12, {
-          color: ['#ffe66d', '#ffffff'], speed: 170, size: r.unit * 0.008, life: 0.45,
+        const color = e.greed ? ['#ffd23f', '#ffffff'] : ['#ffe66d', '#ffffff'];
+        this.fx.burst(p.x, p.y, e.greed ? 18 : 12, {
+          color, speed: e.greed ? 230 : 170, size: r.unit * 0.008, life: 0.45,
         });
         if (!quiet) {
           const label = r.orbitPoint(e.angle, TUNE.playerOrbit - 0.13);
-          this.fx.text(label.x, label.y, `+${e.gain}`, {
-            color: '#ffe66d', size: Math.round(r.unit * 0.06), life: 0.6,
+          this.fx.text(label.x, label.y, e.greed ? `+${e.gain} GREED` : `+${e.gain}`, {
+            color: e.greed ? '#ffd23f' : '#ffe66d',
+            size: Math.round(r.unit * (e.greed ? 0.055 : 0.06)),
+            life: 0.65,
           });
+          this.audio.play(e.greed ? 'greed' : 'orb', e.combo);
+          this.haptics.fire(e.greed ? 'medium' : 'light');
+          this._coach('orb', 'CHAIN ORBS TO BUILD YOUR MULTIPLIER');
+          if (e.greed) this._coach('greed', 'GREED ORBS PAY DOUBLE');
         }
+        break;
+      }
+
+      case EVT.MULTIPLIER: {
+        if (!quiet && e.rising && e.value >= 2) this._coach('mult', 'KEEP THE CHAIN ALIVE');
+        break;
+      }
+
+      case EVT.OVERDRIVE: {
+        playOverdrive(this.fx, r, skin.glow);
         if (!quiet) {
-          this.audio.play('orb', e.combo);
-          this.haptics.fire('light');
+          this.fx.text(r.cx, r.cy - r.unit * 0.62, 'OVERDRIVE', {
+            color: '#ffffff', size: Math.round(r.unit * 0.095), life: 1.2, vy: -18,
+          });
+          this.audio.play('overdrive');
+          this.haptics.fire('success');
         }
+        break;
+      }
+
+      case EVT.COMBO_BREAK: {
+        if (!quiet) {
+          this.fx.text(r.cx, r.cy + r.unit * 0.82, `CHAIN LOST · x${e.from} → x1`, {
+            color: 'rgba(255,255,255,0.62)', size: Math.round(r.unit * 0.05), life: 1,
+          });
+          this.fx.addFlash(0.08, '#ffffff');
+          this.audio.play('chainBreak');
+          this.haptics.fire('warning');
+        }
+        break;
+      }
+
+      case EVT.NEAR: {
+        this.fx.addShake(2.2);
         break;
       }
 
@@ -540,26 +742,10 @@ class Game {
           this.fx.text(r.cx, r.cy - r.unit * 0.62, label, {
             color, size: Math.round(r.unit * 0.085), life: 1.1, vy: -22,
           });
-        }
-        this.fx.addFlash(0.18, color);
-        if (!quiet) {
           this.audio.play('power');
           this.haptics.fire('success');
         }
-        break;
-      }
-
-      case EVT.COMBO_BREAK: {
-        if (!quiet) {
-          this.fx.text(r.cx, r.cy + r.unit * 0.66, 'CHAIN LOST', {
-            color: 'rgba(255,255,255,0.55)', size: Math.round(r.unit * 0.05), life: 0.8,
-          });
-        }
-        break;
-      }
-
-      case EVT.NEAR: {
-        this.fx.addShake(2.2);
+        this.fx.addFlash(0.18, color);
         break;
       }
 
@@ -586,13 +772,10 @@ class Game {
 
       case EVT.ZONE: {
         if (!quiet) this.ui.showZone(e.zone, e.lap);
-        this.audio.setKey(ZONES[e.zone].key);
-        this.ui.setTheme(this._theme(e.zone));
+        this._applyZone(e.zone);
         r.onZone();
-        // Thin and quick: a zone change should flash, not leave something that
-        // could be mistaken for a ring sitting on the orbit.
         this.fx.wave(r.cx, r.cy, r.unit * 0.1, r.unit * 1.5, {
-          color: ZONES[e.zone].palette.accent, width: 2, life: 0.6,
+          color: zoneByIndex(e.zone).palette.accent, width: 2, life: 0.6,
         });
         break;
       }
@@ -606,9 +789,6 @@ class Game {
           color: [skin.trail, '#ffffff'], speed: 180, size: r.unit * 0.02, life: 1.2, shape: 'shard',
         });
         this.fx.wave(p.x, p.y, r.unit * 0.02, r.unit * 0.9, { color: '#ffffff', width: 8, life: 0.6 });
-        this.fx.wave(r.cx, r.cy, TUNE.playerOrbit * r.unit, r.unit * 1.4, {
-          color: '#ff5a5a', width: 3, life: 0.8,
-        });
         this.fx.addShake(30);
         this.fx.addFlash(0.55, '#ffffff');
         if (!quiet) {

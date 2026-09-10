@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <title>Orbital Rush</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<meta name="description" content="One thumb. One orbit. Tap to reverse and thread the gaps in an endless neon galaxy." />
+<meta name="description" content="One thumb. One orbit. Play it safe or reach for the orb — the whole game is that choice." />
 <meta name="theme-color" content="#05121f" />
 <meta name="color-scheme" content="dark" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -24,13 +24,16 @@
 <!-- ------------------------------------------------------------------ HUD -->
 <div id="hud" class="layer" aria-hidden="true">
   <div class="hud-top">
-    <div class="pill" id="energy-pill"><span class="dot"></span><span id="energy-run">0</span></div>
+    <div class="pill" id="shard-pill"><span class="dot"></span><span id="run-shards">0</span></div>
+    <div class="pill ghost-pill" id="ghost-pill" hidden>PB <span id="ghost-delta">0</span></div>
     <button class="icon-btn" id="btn-pause" data-ui aria-label="Pause">❚❚</button>
   </div>
   <div id="score">0</div>
   <div id="multiplier">x1</div>
+  <div id="chain-bar"><i></i></div>
   <div id="powerbar"></div>
-  <div id="zone-banner"><div class="z-num">ZONE 1</div><div class="z-name">GENESIS</div></div>
+  <div id="coach"></div>
+  <div id="zone-banner"><div class="z-num">ZONE 1</div><div class="z-name">FLOW</div></div>
 </div>
 
 <div id="screens">
@@ -41,30 +44,23 @@
     <div class="logo">
       <span class="word">ORBITAL</span>
       <span class="word two">RUSH</span>
-      <div class="tag">TAP TO REVERSE</div>
+      <div class="tag">SAFE OR GREED</div>
     </div>
-    <div class="best-line">BEST <span id="title-best">0</span></div>
+    <div class="home-stats">
+      <div><b id="title-best">0</b><span>BEST</span></div>
+      <div><b id="title-daily">—</b><span>DAILY</span></div>
+      <div><b id="title-streak">0</b><span>STREAK</span></div>
+    </div>
     <div class="spacer"></div>
-    <button class="btn primary" id="btn-play" data-ui>PLAY</button>
+    <button class="btn primary huge" id="btn-play" data-ui>PLAY</button>
     <div class="tap-hint">or tap anywhere</div>
     <div class="icon-row mt">
-      <button class="icon-btn" id="btn-shop" data-ui aria-label="Skins">◆<span class="badge" id="badge-shop" hidden>!</span></button>
-      <button class="icon-btn" id="btn-missions" data-ui aria-label="Daily missions">★<span class="badge" id="badge-missions" hidden>!</span></button>
+      <button class="icon-btn" id="btn-daily-open" data-ui aria-label="Daily run">◷<span class="badge" id="badge-daily" hidden>!</span></button>
+      <button class="icon-btn" id="btn-collection" data-ui aria-label="Collection">▦</button>
+      <button class="icon-btn" id="btn-shop" data-ui aria-label="Shop">◆<span class="badge" id="badge-shop" hidden>!</span></button>
       <button class="icon-btn" id="btn-settings" data-ui aria-label="Settings">⚙</button>
     </div>
     <div class="spacer"></div>
-  </section>
-
-  <!-- ------------------------------------------------------- tutorial --- -->
-  <section class="screen" id="tutorial" aria-label="How to play">
-    <div class="backdrop"></div>
-    <div class="panel tut-card">
-      <h2 class="panel-title">HOW TO PLAY</h2>
-      <div class="tut-step"><span class="k">👆</span><span><b>Tap anywhere</b> to reverse your orbit.<span class="d">That is the whole control.</span></span></div>
-      <div class="tut-step"><span class="k">◠</span><span><b>Slip through the gap</b> in every ring.<span class="d">Dead centre earns a PERFECT bonus.</span></span></div>
-      <div class="tut-step"><span class="k">●</span><span><b>Grab the energy orbs.</b><span class="d">Chain them to raise your multiplier — miss one and the chain resets.</span></span></div>
-      <button class="btn primary" id="btn-tut-go" data-ui>GOT IT</button>
-    </div>
   </section>
 
   <!-- ---------------------------------------------------------- pause --- -->
@@ -74,10 +70,10 @@
       <h2 class="panel-title">PAUSED</h2>
       <div class="stat-grid">
         <div class="stat"><b id="pause-score">0</b><span>SCORE</span></div>
-        <div class="stat"><b id="pause-energy">0</b><span>ENERGY</span></div>
+        <div class="stat"><b id="pause-mult">x1</b><span>MULT</span></div>
         <div class="stat"><b id="pause-zone">1</b><span>ZONE</span></div>
       </div>
-      <div class="mt" style="display:flex;flex-direction:column;gap:calc(var(--u)*2);align-items:center">
+      <div class="mt col">
         <button class="btn primary" id="btn-resume" data-ui>RESUME</button>
         <div class="icon-row">
           <button class="btn small ghost" id="btn-restart" data-ui>RESTART</button>
@@ -87,65 +83,117 @@
     </div>
   </section>
 
-  <!-- ------------------------------------------------------ game over --- -->
-  <section class="screen" id="screen-over" aria-label="Run complete">
+  <!-- ----------------------------------------------------- run summary --- -->
+  <section class="screen scroll" id="screen-over" aria-label="Run complete">
     <div class="backdrop"></div>
-    <div class="spacer"></div>
-    <div class="result-label">SCORE</div>
-    <div class="result-score" id="over-score">0</div>
-    <div class="newbest hidden" id="over-newbest">NEW BEST!</div>
-    <div class="best-line" id="over-best">BEST 0</div>
-    <div class="panel" style="margin-top:calc(var(--u)*3)">
-      <div class="stat-grid">
-        <div class="stat"><b id="over-energy">0</b><span>ENERGY</span></div>
-        <div class="stat"><b id="over-combo">0</b><span>BEST CHAIN</span></div>
-        <div class="stat"><b id="over-zone">1</b><span>ZONE</span></div>
-      </div>
-      <div id="over-missions" class="mt"></div>
-    </div>
-    <div class="spacer"></div>
-    <button class="btn gold hidden" id="btn-revive" data-ui>REVIVE · 150 ⬤</button>
-    <button class="btn primary" id="btn-again" data-ui>PLAY AGAIN</button>
-    <div class="icon-row">
-      <button class="btn small ghost" id="btn-over-home" data-ui>HOME</button>
-      <button class="btn small ghost" id="btn-share" data-ui>SHARE</button>
-    </div>
-    <div class="spacer"></div>
-  </section>
-
-  <!-- ----------------------------------------------------------- shop --- -->
-  <section class="screen scroll" id="screen-shop" aria-label="Skins">
-    <div class="backdrop"></div>
-    <div class="screen-head">
-      <button class="icon-btn" id="btn-shop-back" data-ui aria-label="Back">‹</button>
-      <h2>SKINS</h2>
-      <div class="pill"><span class="dot"></span><span id="shop-energy">0</span></div>
-    </div>
-    <div class="skin-grid" id="skin-grid"></div>
-  </section>
-
-  <!-- ------------------------------------------------------- missions --- -->
-  <section class="screen scroll" id="screen-missions" aria-label="Daily missions">
-    <div class="backdrop"></div>
-    <div class="screen-head">
-      <button class="icon-btn" id="btn-missions-back" data-ui aria-label="Back">‹</button>
-      <h2>DAILY</h2>
-      <div class="pill"><span class="dot"></span><span id="missions-energy">0</span></div>
+    <div class="result-head">
+      <div class="result-label" id="over-mode">RUN COMPLETE</div>
+      <div class="result-score" id="over-score">0</div>
+      <div class="record-row" id="over-records"></div>
+      <div class="best-line" id="over-best">BEST 0</div>
+      <div class="near-line" id="over-near"></div>
     </div>
     <div class="panel">
+      <div class="stat-grid four">
+        <div class="stat"><b id="over-zone">1</b><span>ZONE</span></div>
+        <div class="stat"><b id="over-mult">x1</b><span>MAX MULT</span></div>
+        <div class="stat"><b id="over-perfects">0</b><span>PERFECTS</span></div>
+        <div class="stat"><b id="over-orbs">0</b><span>ORBS</span></div>
+      </div>
+      <div class="greed-line" id="over-greed"></div>
+      <div id="over-missions" class="mt"></div>
+    </div>
+    <div class="over-actions">
+      <button class="btn gold hidden" id="btn-revive" data-ui>REVIVE · 150 ◈</button>
+      <button class="btn primary huge" id="btn-again" data-ui>TRY AGAIN</button>
+      <div class="icon-row">
+        <button class="btn small ghost" id="btn-over-daily" data-ui>DAILY</button>
+        <button class="btn small ghost" id="btn-share" data-ui>SHARE</button>
+        <button class="btn small ghost" id="btn-over-home" data-ui>HOME</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------- daily --- -->
+  <section class="screen scroll" id="screen-daily" aria-label="Daily run">
+    <div class="backdrop"></div>
+    <div class="screen-head">
+      <button class="icon-btn" id="btn-daily-back" data-ui aria-label="Back">‹</button>
+      <h2>DAILY RUN</h2>
+      <div class="pill"><span class="dot"></span><span id="daily-shards">0</span></div>
+    </div>
+    <div class="panel">
+      <div class="daily-hero">
+        <div class="daily-seed" id="daily-seed">#00000</div>
+        <div class="daily-sub">One run. One seed. One score.</div>
+        <div class="daily-date" id="daily-date"></div>
+      </div>
+      <div class="stat-grid four mt">
+        <div class="stat"><b id="daily-score">0</b><span>SCORE</span></div>
+        <div class="stat"><b id="daily-zone">1</b><span>ZONE</span></div>
+        <div class="stat"><b id="daily-mult">x1</b><span>MULT</span></div>
+        <div class="stat"><b id="daily-perfects">0</b><span>PERFECTS</span></div>
+      </div>
+      <button class="btn primary mt" id="btn-daily-play" data-ui>START DAILY</button>
+      <div class="fineprint mt" id="daily-note">Everyone gets the same rings today.</div>
+    </div>
+    <div class="panel mt">
       <div class="streak-row">
         <div>
           <div class="n" id="streak-n">1</div>
           <div class="l">DAY STREAK</div>
         </div>
-        <button class="btn gold small" id="btn-daily" data-ui>CLAIM 50</button>
+        <div class="streak-next" id="streak-next"></div>
       </div>
+      <div class="section-title">TODAY'S MISSIONS <span class="muted" id="mission-count"></span></div>
       <div id="mission-list"></div>
-      <div class="fineprint mt">New missions every day at midnight.</div>
     </div>
+    <div class="panel mt">
+      <div class="section-title" id="daily-board-title">TODAY'S RUNS</div>
+      <div id="daily-board" class="board"></div>
+      <div class="fineprint">Stored on this device. No account, no server.</div>
+    </div>
+    <div class="tail"></div>
   </section>
 
-  <!-- ------------------------------------------------------- settings --- -->
+  <!-- ------------------------------------------------------ collection --- -->
+  <section class="screen scroll" id="screen-collection" aria-label="Profile and collection">
+    <div class="backdrop"></div>
+    <div class="screen-head">
+      <button class="icon-btn" id="btn-collection-back" data-ui aria-label="Back">‹</button>
+      <h2>PROFILE</h2>
+      <div class="pill"><span class="dot"></span><span id="collection-shards">0</span></div>
+    </div>
+    <div class="panel">
+      <div class="stat-grid"><div class="stat"><b id="pr-best">0</b><span>BEST SCORE</span></div><div class="stat"><b id="pr-zone">1</b><span>BEST ZONE</span></div><div class="stat"><b id="pr-mult">x1</b><span>MAX MULT</span></div></div>
+      <div class="stat-grid mt"><div class="stat"><b id="pr-perfects">0</b><span>PERFECTS</span></div><div class="stat"><b id="pr-orbs">0</b><span>ORBS</span></div><div class="stat"><b id="pr-streak">0</b><span>STREAK</span></div></div>
+    </div>
+    <div class="panel mt">
+      <div class="section-title">COLLECTION <span class="muted" id="collection-count"></span></div>
+      <div id="collection-grid"></div>
+    </div>
+    <div class="panel mt">
+      <div class="section-title">ACHIEVEMENTS <span class="muted" id="achievement-count"></span></div>
+      <div id="achievement-list"></div>
+    </div>
+    <div class="tail"></div>
+  </section>
+
+  <!-- ------------------------------------------------------------ shop --- -->
+  <section class="screen scroll" id="screen-shop" aria-label="Shop">
+    <div class="backdrop"></div>
+    <div class="screen-head">
+      <button class="icon-btn" id="btn-shop-back" data-ui aria-label="Back">‹</button>
+      <h2>SHOP</h2>
+      <div class="pill"><span class="dot"></span><span id="shop-shards">0</span></div>
+    </div>
+    <div class="tabs" id="shop-tabs" role="tablist"></div>
+    <div class="skin-grid" id="shop-grid"></div>
+    <div class="fineprint">No ads. No loot boxes. Nothing here changes how the game plays.</div>
+    <div class="tail"></div>
+  </section>
+
+  <!-- -------------------------------------------------------- settings --- -->
   <section class="screen scroll" id="screen-settings" aria-label="Settings">
     <div class="backdrop"></div>
     <div class="screen-head">
@@ -157,7 +205,7 @@
       <div class="row"><span>Music</span><button class="switch" id="sw-music" role="switch" aria-checked="true" data-ui></button></div>
       <div class="row"><span>Sound effects</span><button class="switch" id="sw-sfx" role="switch" aria-checked="true" data-ui></button></div>
       <div class="row"><span>Haptics</span><button class="switch" id="sw-haptics" role="switch" aria-checked="true" data-ui></button></div>
-      <div class="row"><span>Reduced effects<span class="sub">Fewer particles and no screen shake</span></span><button class="switch" id="sw-reduced" role="switch" aria-checked="false" data-ui></button></div>
+      <div class="row"><span>Reduced effects<span class="sub">Fewer particles, no screen shake. Gameplay is identical.</span></span><button class="switch" id="sw-reduced" role="switch" aria-checked="false" data-ui></button></div>
     </div>
     <div class="panel mt">
       <div class="stat-grid">
@@ -166,20 +214,20 @@
         <div class="stat"><b id="st-time">0:00</b><span>PLAYED</span></div>
       </div>
       <div class="stat-grid mt">
-        <div class="stat"><b id="st-best">0</b><span>BEST</span></div>
-        <div class="stat"><b id="st-combo">0</b><span>BEST CHAIN</span></div>
-        <div class="stat"><b id="st-energy">0</b><span>TOTAL ENERGY</span></div>
+        <div class="stat"><b id="st-greed">0</b><span>GREED ORBS</span></div>
+        <div class="stat"><b id="st-shards">0</b><span>TOTAL SHARDS</span></div>
+        <div class="stat"><b id="st-daily">0</b><span>DAILY RUNS</span></div>
       </div>
     </div>
     <div class="panel mt center">
+      <div class="no-ads">NO ADS. JUST PLAY.</div>
       <div class="fineprint">
-        Orbital Rush <span id="app-version">1.0.0</span><br />
-        No ads. No tracking. No account.<br />
-        Everything you unlock stays on this device.
+        Orbital Rush <span id="app-version">1.1.0</span><br />
+        No tracking. No account. Everything you unlock stays on this device.
       </div>
       <button class="btn small ghost mt" id="btn-reset" data-ui>RESET PROGRESS</button>
     </div>
-    <div style="height:calc(var(--u)*6)"></div>
+    <div class="tail"></div>
   </section>
 
 </div>

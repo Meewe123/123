@@ -209,11 +209,11 @@ test('double score awards two points per ring', () => {
   assert.equal(gained, 2);
 });
 
-test('the energy chain survives a collected orb and breaks on a missed one', () => {
+test('the chain survives a collected orb and breaks on a missed one', () => {
   const missed = new World(55);
   missed.combo = 6;
   const a = missed.rings[0];
-  a.orbs = [{ gapIndex: 0, offset: 0, type: 'energy', taken: false }];
+  a.orbs = [{ gapIndex: 0, offset: 0, type: 'shard', taken: false }];
   a.collected = 0;
   a.centreDist = 0.5;
   a.centreHalf = 1;
@@ -224,7 +224,7 @@ test('the energy chain survives a collected orb and breaks on a missed one', () 
   const kept = new World(55);
   kept.combo = 6;
   const b = kept.rings[0];
-  b.orbs = [{ gapIndex: 0, offset: 0, type: 'energy', taken: false }];
+  b.orbs = [{ gapIndex: 0, offset: 0, type: 'shard', taken: false }];
   b.collected = 1;
   b.centreDist = 0.5;
   b.centreHalf = 1;

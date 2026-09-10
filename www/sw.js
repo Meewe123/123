@@ -4,7 +4,7 @@
  * Bump CACHE when shipping a new build to retire the old files.
  */
 
-const CACHE = 'orbital-rush-v1.0.0';
+const CACHE = 'orbital-rush-v1.1.0';
 
 const PRECACHE = [
   './',
@@ -26,6 +26,14 @@ const PRECACHE = [
   'src/game/meta.js',
   'src/game/autopilot.js',
   'src/game/palette.js',
+  'src/game/effects.js',
+  'src/game/ghost.js',
+  'src/game/daily.js',
+  'src/game/achievements.js',
+  'src/services/leaderboard.js',
+  'src/services/purchase.js',
+  'src/services/challenge.js',
+  'src/ui/sharecard.js',
   'src/ui/ui.js',
   'assets/icons/icon-180.png',
   'assets/icons/icon-192.png',

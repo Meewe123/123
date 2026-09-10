@@ -11,9 +11,10 @@
  * only accepts a single document. The `--fragment` form omits the
  * <html>/<head>/<body> wrapper for hosts that supply their own.
  *
- * The transform only supports the import/export forms this codebase actually
- * uses (named imports, namespace imports, and `export const|function|class`),
- * and throws on anything else rather than emitting something subtly broken.
+ * The transform supports the import/export forms this codebase uses — named
+ * imports (on one line or several), namespace imports, and
+ * `export const|let|var|function|class` — and throws on anything else rather
+ * than emitting something subtly broken.
  */
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
@@ -37,12 +38,22 @@ async function transform(id) {
   const exported = [];
   const out = [];
 
-  for (const line of source.split('\n')) {
+  for (const line of joinImports(source.split('\n'))) {
     const named = line.match(IMPORT_NAMED);
     if (named) {
       const dep = resolveId(id, named[2]);
       deps.push(dep);
-      const bindings = named[1].split(',').map((s) => s.trim()).filter(Boolean).join(', ');
+      // `import { a as b }` becomes `const { a: b }` — the two syntaxes for
+      // renaming a binding are not the same one.
+      const bindings = named[1]
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => {
+          const renamed = part.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
+          return renamed ? `${renamed[1]}: ${renamed[2]}` : part;
+        })
+        .join(', ');
       out.push(`const { ${bindings} } = __req(${JSON.stringify(dep)});`);
       continue;
     }
@@ -74,6 +85,34 @@ async function transform(id) {
     out.push('', `Object.assign(__x, { ${exported.join(', ')} });`);
   }
   return { id, deps, exported, code: out.join('\n') };
+}
+
+/**
+ * Fold a multi-line import statement onto one line so a single regex can read
+ * it. Blank lines are emitted in its place, keeping line counts roughly honest
+ * in the bundled output.
+ */
+function joinImports(lines) {
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!/^\s*import\b/.test(line) || /\bfrom\s*['"]/.test(line)) {
+      out.push(line);
+      continue;
+    }
+    const parts = [line.trim()];
+    let j = i + 1;
+    while (j < lines.length && !/\bfrom\s*['"]/.test(lines[j])) {
+      parts.push(lines[j].trim());
+      j++;
+    }
+    if (j >= lines.length) throw new Error(`unterminated import: ${line.trim()}`);
+    parts.push(lines[j].trim());
+    out.push(parts.join(' ').replace(/\s+/g, ' '));
+    for (let k = i; k < j; k++) out.push('');
+    i = j;
+  }
+  return out;
 }
 
 function resolveId(fromId, spec) {

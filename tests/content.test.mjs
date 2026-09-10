@@ -4,14 +4,18 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ZONES, SKINS, TUNE, POWERUPS, MISSION_TEMPLATES, DAILY_REWARDS } from '../www/src/game/config.js';
+import {
+  ZONES, SKINS, TRAILS, EFFECTS, COSMETIC_KINDS, ACHIEVEMENTS, TUNE, POWERUPS,
+  MISSION_TEMPLATES, DAILY_REWARDS, STREAK_MILESTONES, achievementById,
+} from '../www/src/game/config.js';
+import { EFFECT_IDS } from '../www/src/game/effects.js';
 import * as store from '../www/src/engine/storage.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const HEX = /^#[0-9a-f]{6}$/i;
 
 test('every zone is complete and playable', () => {
-  assert.ok(ZONES.length >= 6, 'enough visual variety to keep a long run interesting');
+  assert.equal(ZONES.length, 8, 'eight zones, each with its own atmosphere');
   const ids = new Set();
   for (const zone of ZONES) {
     assert.ok(zone.id && !ids.has(zone.id), `duplicate zone id: ${zone.id}`);
@@ -23,7 +27,16 @@ test('every zone is complete and playable', () => {
     for (const [key, value] of Object.entries(zone.palette)) {
       assert.match(value, HEX, `${zone.id}.${key} is not a hex colour`);
     }
+    for (const key of ['sky', 'motes', 'perfect']) {
+      assert.ok(zone.fx[key], `${zone.id} is missing fx.${key}`);
+    }
+    assert.ok(zone.voice, `${zone.id} has no audio voice`);
   }
+
+  const voices = new Set(ZONES.map((z) => z.voice));
+  assert.equal(voices.size, ZONES.length, 'no two zones sound the same');
+  const skies = new Set(ZONES.map((z) => z.fx.sky));
+  assert.equal(skies.size, ZONES.length, 'no two zones look the same');
 });
 
 test('a full lap through the zones is long enough to feel like a journey', () => {
@@ -31,21 +44,72 @@ test('a full lap through the zones is long enough to feel like a journey', () =>
   assert.ok(ringsPerLap >= 80, `only ${ringsPerLap} rings before the zones repeat`);
 });
 
-test('skins are unique and priced on a rising curve', () => {
-  const ids = new Set();
-  let previousCost = -1;
+test('every cosmetic is unique, legible and reachable', () => {
+  const shapes = ['orb', 'diamond', 'square', 'star'];
+  for (const kind of COSMETIC_KINDS) {
+    const ids = new Set();
+    let previousCost = -1;
+    for (const item of kind.items) {
+      assert.ok(!ids.has(item.id), `duplicate ${kind.id} id: ${item.id}`);
+      ids.add(item.id);
+      assert.ok(item.name.length > 0, `${item.id} needs a name`);
+      assert.ok(['free', 'shards', 'achievement', 'premium'].includes(item.unlock),
+        `${item.id} has an unknown unlock type: ${item.unlock}`);
+      if (item.unlock === 'shards') {
+        assert.ok(item.cost > previousCost, `${item.id} breaks the rising price curve`);
+        previousCost = item.cost;
+      }
+      if (item.unlock === 'achievement') {
+        assert.ok(achievementById(item.achievement),
+          `${item.id} points at a missing achievement: ${item.achievement}`);
+      }
+      if (item.unlock === 'premium') {
+        assert.ok(item.sku, `${item.id} is premium but has no sku`);
+      }
+    }
+    assert.equal(kind.items[0].unlock, 'free', `${kind.id} needs a starter item`);
+  }
+
   for (const skin of SKINS) {
-    assert.ok(!ids.has(skin.id), `duplicate skin id: ${skin.id}`);
-    ids.add(skin.id);
-    assert.ok(skin.name.length > 0);
-    assert.ok(skin.cost >= previousCost, `${skin.id} breaks the rising price curve`);
-    previousCost = skin.cost;
     for (const key of ['core', 'glow', 'trail']) {
       assert.match(skin[key], HEX, `${skin.id}.${key} is not a hex colour`);
     }
-    assert.ok(['orb', 'diamond', 'square', 'star'].includes(skin.shape), `${skin.id} has an unknown shape`);
+    assert.ok(shapes.includes(skin.shape), `${skin.id} has an unknown shape`);
+    assert.ok(EFFECT_IDS.includes(skin.effect) || skin.effect === 'zone',
+      `${skin.id} points at an unknown PERFECT effect`);
   }
-  assert.equal(SKINS[0].cost, 0, 'the starter skin is free');
+
+  assert.equal(SKINS.length, 12, 'twelve skins, as designed');
+  assert.ok(TRAILS.length >= 4 && EFFECTS.length >= 4, 'trails and effects are real categories');
+});
+
+test('every PERFECT effect a zone or cosmetic names actually exists', () => {
+  for (const zone of ZONES) {
+    assert.ok(EFFECT_IDS.includes(zone.fx.perfect),
+      `zone ${zone.id} wants a PERFECT effect that is not implemented: ${zone.fx.perfect}`);
+  }
+  for (const effect of EFFECTS) {
+    if (effect.id === 'zone') continue;
+    assert.ok(EFFECT_IDS.includes(effect.id), `effect ${effect.id} has no recipe`);
+  }
+});
+
+test('achievements are unique, earnable and pay out', () => {
+  const ids = new Set();
+  const profile = {
+    totalPerfects: 1e6, bestZone: 99, bestMultiplier: 99, totalOrbs: 1e6,
+    totalGreedOrbs: 1e6, noShieldZone: 99, dailyRuns: 99,
+  };
+  for (const a of ACHIEVEMENTS) {
+    assert.ok(!ids.has(a.id), `duplicate achievement id: ${a.id}`);
+    ids.add(a.id);
+    assert.ok(a.name && a.desc, `${a.id} needs a name and a description`);
+    assert.ok(a.reward > 0, `${a.id} pays nothing`);
+    assert.equal(typeof a.test, 'function');
+    assert.ok(a.test(profile), `${a.id} is unreachable even for a maxed profile`);
+    assert.equal(a.test({}), false, `${a.id} fires on an empty profile`);
+  }
+  assert.equal(ACHIEVEMENTS.length, 12, 'a compact set, not a checklist');
 });
 
 test('every power-up has a label and a colour', () => {
@@ -72,7 +136,19 @@ test('mission templates produce sane goals', () => {
 
 test('the revive price is meaningful but attainable', () => {
   assert.ok(TUNE.reviveCost > 0);
-  assert.ok(TUNE.reviveCost < SKINS[1].cost, 'a revive should cost less than the first skin');
+  const firstBuyable = SKINS.find((s) => s.unlock === 'shards');
+  assert.ok(TUNE.reviveCost < firstBuyable.cost, 'a revive should cost less than the first skin');
+});
+
+test('streak milestones grow and stay cosmetic-scale', () => {
+  let previousDays = 0;
+  let previousReward = 0;
+  for (const m of STREAK_MILESTONES) {
+    assert.ok(m.days > previousDays, 'milestones must be in order');
+    assert.ok(m.reward > previousReward, 'later milestones must be worth more');
+    previousDays = m.days;
+    previousReward = m.reward;
+  }
 });
 
 test('a corrupt or partial save never breaks the profile', () => {
@@ -80,16 +156,18 @@ test('a corrupt or partial save never breaks the profile', () => {
   assert.deepEqual(store.migrate('nonsense'), store.DEFAULT_PROFILE);
   assert.deepEqual(store.migrate({}), store.DEFAULT_PROFILE);
 
-  const partial = store.migrate({ bestScore: 42, unknownField: 'x', sfx: 'yes' });
+  const partial = store.migrate({ version: 2, bestScore: 42, unknownField: 'x', sfx: 'yes' });
   assert.equal(partial.bestScore, 42);
   assert.equal(partial.sfx, true, 'a wrongly-typed value falls back to the default');
   assert.equal('unknownField' in partial, false, 'unknown keys are dropped');
-  assert.ok(partial.ownedSkins.includes('aurora'));
+  assert.ok(partial.ownedSkins.includes('flow'));
 });
 
-test('an equipped skin the player does not own is reset', () => {
-  const p = store.migrate({ skin: 'nova', ownedSkins: ['aurora'] });
-  assert.equal(p.skin, 'aurora');
+test('an equipped cosmetic the player does not own is reset', () => {
+  const p = store.migrate({ version: 2, skin: 'nova', ownedSkins: ['flow'], trail: 'prism', effect: 'bloom' });
+  assert.equal(p.skin, 'flow');
+  assert.equal(p.trail, 'comet');
+  assert.equal(p.effect, 'zone');
 });
 
 test('the service worker precaches every shipped source file', () => {

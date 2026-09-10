@@ -9,6 +9,22 @@ const PENTA = [0, 3, 5, 7, 10];
 
 const noteHz = (semitone) => 440 * Math.pow(2, (semitone - 9) / 12);
 
+/**
+ * One timbre per zone. Same synth graph throughout — only the oscillator
+ * shapes, filter and layer balance move, so a zone can sound completely
+ * different without shipping a single byte of audio.
+ */
+const VOICES = {
+  calm: { arp: 'triangle', pad: 'sawtooth', cutoff: 900, arpGain: 1.0, hats: 1.0, sub: 1.0, detune: 7, padGain: 1.0, perfect: [31, 36] },
+  electric: { arp: 'square', pad: 'sawtooth', cutoff: 1500, arpGain: 0.85, hats: 1.3, sub: 0.9, detune: 14, padGain: 0.8, perfect: [31, 38] },
+  intense: { arp: 'sawtooth', pad: 'sawtooth', cutoff: 1300, arpGain: 1.05, hats: 1.2, sub: 1.35, detune: 10, padGain: 1.1, perfect: [28, 35] },
+  crystal: { arp: 'sine', pad: 'triangle', cutoff: 2600, arpGain: 0.8, hats: 0.7, sub: 0.7, detune: 3, padGain: 0.8, perfect: [36, 43] },
+  unstable: { arp: 'triangle', pad: 'sawtooth', cutoff: 1100, arpGain: 1.0, hats: 0.9, sub: 1.0, detune: 22, padGain: 1.0, perfect: [30, 37] },
+  ghostly: { arp: 'sine', pad: 'triangle', cutoff: 700, arpGain: 0.75, hats: 0.5, sub: 0.85, detune: 16, padGain: 1.2, perfect: [29, 34] },
+  storm: { arp: 'sawtooth', pad: 'sawtooth', cutoff: 1800, arpGain: 1.15, hats: 1.5, sub: 1.4, detune: 12, padGain: 1.0, perfect: [26, 33] },
+  void: { arp: 'sine', pad: 'sine', cutoff: 520, arpGain: 0.5, hats: 0.15, sub: 1.15, detune: 4, padGain: 0.7, perfect: [24, 31] },
+};
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -22,6 +38,7 @@ export class AudioEngine {
     this._nextNote = 0;
     this._step = 0;
     this._root = -5; // G
+    this._voice = VOICES.calm;
   }
 
   /** Must be called from inside a user gesture (iOS unlocks audio that way). */
@@ -113,6 +130,11 @@ export class AudioEngine {
     this._root = rootSemitone;
   }
 
+  /** Timbre per zone: which oscillators, how bright, how much of each layer. */
+  setVoice(name) {
+    this._voice = VOICES[name] || VOICES.calm;
+  }
+
   // ---------------------------------------------------------------- sfx ---
 
   _env(node, t, { attack = 0.004, decay = 0.12, peak = 1, sustain = 0 }) {
@@ -181,9 +203,27 @@ export class AudioEngine {
           type: 'sine', dur: 0.12, gain: 0.2, send: 0.35,
         });
         break;
-      case 'perfect':
-        this._tone(noteHz(this._root + 31), { type: 'sine', dur: 0.1, gain: 0.18, send: 0.4 });
-        this._tone(noteHz(this._root + 36), { type: 'sine', dur: 0.14, gain: 0.16, send: 0.4, delayStart: 0.055 });
+      case 'perfect': {
+        // The cue takes the zone's own interval, so a PERFECT in VOID lands
+        // lower and emptier than one in STORM.
+        const [a, b] = this._voice.perfect;
+        const type = this._voice.arp === 'sawtooth' ? 'triangle' : this._voice.arp;
+        this._tone(noteHz(this._root + a), { type, dur: 0.1, gain: 0.18, send: 0.4 });
+        this._tone(noteHz(this._root + b), { type, dur: 0.16, gain: 0.16, send: 0.42, delayStart: 0.055 });
+        break;
+      }
+      case 'greed':
+        // A greed orb answers with a brighter, slightly sharper confirmation.
+        this._tone(noteHz(this._root + 26 + (arg % 5)), { type: 'square', dur: 0.09, gain: 0.13, send: 0.3 });
+        this._tone(noteHz(this._root + 33 + (arg % 5)), { type: 'sine', dur: 0.16, gain: 0.16, send: 0.45, delayStart: 0.045 });
+        break;
+      case 'overdrive':
+        [0, 5, 9, 12, 16, 19].forEach((semi, i) => this._tone(noteHz(this._root + 24 + semi), {
+          type: 'triangle', dur: 0.35, gain: 0.13, delayStart: i * 0.055, send: 0.5,
+        }));
+        break;
+      case 'chainBreak':
+        this._tone(noteHz(this._root + 19), { type: 'triangle', dur: 0.22, gain: 0.12, slideTo: noteHz(this._root + 7) });
         break;
       case 'hit':
         this._noise({ dur: 0.45, gain: 0.4, cutoff: 3200 });
@@ -245,6 +285,7 @@ export class AudioEngine {
     const I = this.intensity;
     const bus = this.musicBus;
     const root = this._root;
+    const V = this._voice;
 
     // Sub pulse — the heartbeat of the track.
     if (step % 4 === 0) {
@@ -254,15 +295,15 @@ export class AudioEngine {
       o.frequency.setValueAtTime(noteHz(root - 12), t);
       o.frequency.exponentialRampToValueAtTime(noteHz(root - 24), t + 0.22);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.5, t + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      g.gain.exponentialRampToValueAtTime(0.5 * V.sub, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3 * V.sub);
       o.connect(g).connect(bus);
       o.start(t);
       o.stop(t + 0.34);
     }
 
     // Hat — appears as the run heats up.
-    if (I > 0.18 && step % 2 === 1) {
+    if (V.hats > 0.25 && I > 0.18 && step % 2 === 1) {
       const s = this.ctx.createBufferSource();
       s.buffer = this._noiseBuffer;
       const f = this.ctx.createBiquadFilter();
@@ -270,7 +311,7 @@ export class AudioEngine {
       f.frequency.value = 7000;
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.05 + I * 0.07, t + 0.004);
+      g.gain.exponentialRampToValueAtTime((0.05 + I * 0.07) * V.hats, t + 0.004);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
       s.connect(f).connect(g).connect(bus);
       s.start(t);
@@ -285,12 +326,12 @@ export class AudioEngine {
       const o = this.ctx.createOscillator();
       const f = this.ctx.createBiquadFilter();
       const g = this.ctx.createGain();
-      o.type = 'triangle';
+      o.type = V.arp;
       o.frequency.value = noteHz(root + octave + degree);
       f.type = 'lowpass';
-      f.frequency.value = 900 + I * 4200;
+      f.frequency.value = V.cutoff + I * 4200;
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.09 + I * 0.05, t + 0.01);
+      g.gain.exponentialRampToValueAtTime((0.09 + I * 0.05) * V.arpGain, t + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
       o.connect(f).connect(g).connect(bus);
       o.start(t);
@@ -302,17 +343,17 @@ export class AudioEngine {
       const chord = [0, 3, 7, 10];
       const f = this.ctx.createBiquadFilter();
       f.type = 'lowpass';
-      f.frequency.setValueAtTime(420 + I * 1500, t);
+      f.frequency.setValueAtTime(V.cutoff * 0.45 + I * 1500, t);
       f.Q.value = 3;
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.05 + I * 0.04, t + 0.9);
+      g.gain.exponentialRampToValueAtTime((0.05 + I * 0.04) * V.padGain, t + 0.9);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
       f.connect(g).connect(bus);
       for (const semi of chord) {
-        for (const det of [-7, 7]) {
+        for (const det of [-V.detune, V.detune]) {
           const o = this.ctx.createOscillator();
-          o.type = 'sawtooth';
+          o.type = V.pad;
           o.frequency.value = noteHz(root + semi);
           o.detune.value = det;
           o.connect(f);

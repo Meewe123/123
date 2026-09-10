@@ -11,10 +11,10 @@ That is the entire control scheme.
 </p>
 
 <p align="center">
-  <img src="docs/preview/1-title.png" width="200" alt="Title screen" />
-  <img src="docs/preview/3-chain.png" width="200" alt="An x8 chain in the Pulse zone" />
-  <img src="docs/preview/4-storm-zone.png" width="200" alt="The Storm zone" />
-  <img src="docs/preview/5-skins.png" width="200" alt="Unlockable trails" />
+  <img src="docs/preview/2-safe-or-greed.png" width="196" alt="Safe line or greed orb" />
+  <img src="docs/preview/3-inferno.png" width="196" alt="The Inferno zone" />
+  <img src="docs/preview/5-overdrive.png" width="196" alt="OVERDRIVE at x8" />
+  <img src="docs/preview/6-void.png" width="196" alt="The Void zone" />
 </p>
 
 ---
@@ -26,7 +26,7 @@ That is the entire control scheme.
 | **The game** | `www/` — a zero-dependency ES-module web app. No engine, no framework, no bundler. |
 | **The native app** | `ios/` — a real Xcode project (Capacitor 8, Swift Package Manager, no CocoaPods). |
 | **The art** | `tools/make_icons.py` — every icon and the launch image are generated from code. |
-| **The tests** | `tests/` — 42 head-less simulation/meta tests, a 37-check browser end-to-end run, and an 11-check run of the single-file build. |
+| **The tests** | `tests/` — 65 head-less simulation/meta tests, a 54-check browser end-to-end run, and an 11-check run of the single-file build. |
 | **The listing** | `store/` — description, keywords, privacy policy, App Privacy answers, review notes, and generated screenshots. |
 
 No ads, no analytics, no in-app purchases, no accounts, no network calls. The
@@ -50,23 +50,64 @@ Desktop controls: **space / ← / →** reverse, same as tapping.
 ### The loop
 
 You orbit at a fixed radius. Rings shrink toward you. When a ring reaches your
-orbit you either slip through a gap or you are out. Every ring is worth a point;
-orbs sitting *off-centre inside the gaps* are worth energy.
+orbit you either slip through a gap or you are out. Every ring is worth a point.
 
-Two decisions make it more than a reflex test:
+The game is the choice inside that:
 
-* **The greedy line.** Taking an orb means aiming at the orb rather than the
-  middle of the gap. Chain orbs and your multiplier climbs to x8. Miss an orb on
-  a ring that had one and the chain resets to zero — so greed compounds and so
-  does punishment.
-* **The perfect line.** Threading a gap dead-centre is a PERFECT and pays a
-  bonus. The safest line and the most profitable line are not the same line.
+* **Safe or greed.** Every orb is generated at a measured distance from the safe
+  line. A *safe* orb sits near the middle of the gap and costs you almost
+  nothing. A *greed* orb sits out where taking it eats most of your margin — and
+  it pays double shards and advances your chain by two, which is the only fast
+  way to x8. Roughly a third to a half of rings pose the question; the rest let
+  you breathe.
+* **The perfect line.** Threading a gap dead-centre is a PERFECT: a bonus, a
+  hit-stop, and an effect unique to the zone you are in. The safest line, the
+  most profitable line and the most beautiful line are three different lines.
+* **The chain.** Miss an orb on a ring that had one and the chain resets to
+  zero. At x8 the run enters **OVERDRIVE** — the halo, the trail, the music and
+  the PERFECTs all step up. It is a state, not a power-up: nothing gets easier.
 
-An orb never sits further off-centre than the gap can spare: reaching for one
-always costs part of your margin, and never all of it.
+An orb never sits further off-centre than the gap can spare — reaching for one
+always costs part of your margin, and never all of it. That is asserted by a
+test, not by hand.
 
 Shields arrive on a schedule you can count on — ring 10, then every 15 — and
 each one takes two rings before it breaks.
+
+### The eight zones
+
+Every fourteen rings the world changes. Not just the palette: the hazard, the
+ambient particles, the background behaviour, the synth voice and the PERFECT
+effect all change together.
+
+| | Zone | Hazard | PERFECT | Sound |
+| --- | --- | --- | --- | --- |
+| 1 | **FLOW** | wide single gaps | a soft pulse | calm |
+| 2 | **VOLTAGE** | rings reverse each time | an electric arc | electric |
+| 3 | **INFERNO** | twin rings, back to back | an ember burst | intense |
+| 4 | **FROZEN** | rings breathe in and out | a shatter | crystalline |
+| 5 | **DRIFT** | the gap slides while you aim | space folds | unstable |
+| 6 | **GHOST** | the ring appears late | an echo of you | ghostly |
+| 7 | **STORM** | fast rotation, two gaps | a lightning strike | storm |
+| 8 | **VOID** | drift and reversal together | almost nothing | minimal |
+
+Readability wins over spectacle everywhere: no effect is allowed to fire across
+the approach, and reduced-effects mode swaps every zone recipe for the cheapest
+one without touching the simulation.
+
+### Coming back
+
+* **Your ghost.** Your best endless run is recorded as an angle and a score on a
+  fixed time grid and replayed as a hollow outline on the next attempt. The HUD
+  shows whether you are ahead of it. It never touches collision.
+* **The daily run.** One seed derived from the date, so everyone gets the same
+  rings. One attempt counts; replays sharpen your own record.
+* **Three missions a day**, rolled deterministically from the date — take twelve
+  greed orbs, reach Zone 4 without a shield, beat your own best.
+* **A streak** that pays at 3, 7, 14 and 30 days, and never punishes a miss.
+* **Twelve achievements and twenty-four cosmetics** across skins, trails and
+  PERFECT effects. Some bought with shards, some earned, none of them touching
+  how the game plays.
 
 ### Why it never feels cheap
 
@@ -150,8 +191,19 @@ www/
       world.js             the simulation (no DOM — runs in Node)
       render.js            canvas renderer
       meta.js              missions, streak, economy (pure functions)
+      effects.js           one PERFECT recipe per zone, plus cosmetic overrides
+      ghost.js             records and replays the personal best
+      daily.js             the date-derived daily seed
+      achievements.js      predicates over the profile, evaluated after a run
       palette.js           nudges zone hues clear of the equipped skin
       autopilot.js         reference player: attract mode + tests
+    services/
+      leaderboard.js       local store behind a backend-shaped interface
+      purchase.js          IAP abstraction — refuses honestly with no bridge
+      challenge.js         "beat my score" codes carried in a link
+    ui/
+      ui.js                screens, shop, collection, daily, HUD
+      sharecard.js         the share image, drawn on a canvas
     ui/ui.js               screens, shop, missions, settings, toasts
   sw.js                    offline precache
   manifest.webmanifest     installable as a PWA too
@@ -166,8 +218,8 @@ store/                     everything App Store Connect asks for
 ## Testing
 
 ```bash
-npm test            # 42 head-less tests: simulation, fairness, economy, assets
-npm run test:e2e    # 37 checks in real Chromium at phone/tablet/landscape sizes
+npm test            # 65 head-less tests: simulation, fairness, economy, assets
+npm run test:e2e    # 54 checks in real Chromium at phone/tablet/landscape sizes
 npm run test:bundle # 11 checks driving the single-file build off the filesystem
 npm run verify      # icons + all three suites
 ```
@@ -258,30 +310,35 @@ privacy URLs before you submit; App Review checks that both load.
 
 ---
 
-## Deliberate omissions
+## What is deliberately not here
 
-Two things a score-chaser often ships with are missing on purpose, and both are
-easy to add if you want them:
+* **No ads.** Not banners, not interstitials, not rewarded video, not a "watch
+  to continue" after a death. There is no ad SDK in the project at all.
+* **No loot boxes, no energy timer, no battle pass, no subscription, no second
+  or third currency.** One currency, SHARDS, earned by playing.
+* **No fake anything.** `LeaderboardService` reports `isGlobal === false` and
+  the UI says "YOUR RECORDS", because there is no server. `PurchaseService`
+  reports `available === false` and premium items say so, because there is no
+  billing bridge — it never simulates a purchase. Both are interfaces a real
+  backend can implement without gameplay changing.
+* **No Game Center.** Adding it means linking `GameKit` and touching an Apple
+  account, which is what currently lets the app carry a *Data Not Collected*
+  privacy label. `LeaderboardService` is the seam if you want to make that trade.
 
-* **Game Center leaderboards.** Adding them means linking `GameKit`, enabling
-  the Game Center capability, and reporting `bestScore` after `commitRun()`. It
-  would also mean the app touches an Apple account, which is why the current
-  build can honestly claim "no account, nothing collected" and carry a *Data
-  Not Collected* privacy label. That trade is yours to make.
-* **In-app purchases and ads.** There is no StoreKit or ad SDK anywhere in the
-  project. Energy is earned only by playing. If you monetise later, note that
-  the App Privacy answers in `store/app-privacy.md` and the copy in
-  `store/metadata.md` both promise otherwise and would need rewriting.
+The monetisation the architecture is built for is voluntary cosmetics: two
+premium skins already route through `PurchaseService`. Nothing sold changes how
+the game plays, and the two achievement-gated skins can never be bought.
 
 ## Tuning the game
 
 Almost everything lives in `www/src/game/config.js`:
 
 * `TUNE` — orbit radius, the player's two half-extents, ring speed, spacing,
-  the gap margin, chain rules, revive price.
-* `ZONES` — palette, gap count, gap width, rotation range and hazard flags.
-* `SKINS` — cosmetics and prices.
-* `MISSION_TEMPLATES` / `DAILY_REWARDS` — the daily loop.
+  the gap margin, the greed threshold and bonus, chain rules, revive price.
+* `ZONES` — palette, hazard flags, effect recipe and synth voice per zone.
+* `SKINS` / `TRAILS` / `EFFECTS` — cosmetics, prices and how each is unlocked.
+* `ACHIEVEMENTS` — twelve, each a pure predicate over the saved profile.
+* `MISSION_TEMPLATES` / `DAILY_REWARDS` / `STREAK_MILESTONES` — the daily loop.
 
 After a change, run `npm test`: the suite checks the ramp stays playable and
 that a competent player can still survive, so it will tell you if a tweak made

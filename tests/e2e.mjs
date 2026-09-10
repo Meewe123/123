@@ -146,15 +146,14 @@ async function main() {
       `colors=${variety.colors} bright=${variety.bright}`);
     await page.screenshot({ path: `${SHOTS}/01-title.png` });
 
-    console.log('\ntutorial + first run');
+    console.log('\nfirst run');
     await page.locator('#btn-play').click();
-    await page.waitForSelector('#tutorial.on', { timeout: 3000 });
-    check('first-time tutorial is shown', true);
-    await page.screenshot({ path: `${SHOTS}/02-tutorial.png` });
-    await page.locator('#btn-tut-go').click();
     await page.waitForFunction(() => globalThis.__ORBITAL__.mode === 'play', null, { timeout: 3000 });
-    check('tapping GOT IT starts the run', true);
+    check('PLAY starts a run immediately — no tutorial gate', true);
     check('HUD is visible during play', await page.locator('#hud').evaluate((el) => el.classList.contains('on')));
+    check('the first run coaches the control in one line',
+      await page.locator('#coach').evaluate((el) => el.classList.contains('on') && el.textContent.length > 0));
+    await page.screenshot({ path: `${SHOTS}/02-first-run.png` });
 
     console.log('\ngameplay');
     await page.evaluate(() => {
@@ -178,7 +177,9 @@ async function main() {
         mode: g.mode,
         score: g.world.score,
         peak: Math.max(g.__peak, g.world.score),
-        energy: g.world.energy,
+        shards: g.world.shards,
+        orbs: g.world.orbsCollected,
+        multiplier: g.world.multiplier,
         zone: g.world.zone,
         hudScore: document.getElementById('score').textContent,
         fps: g.loop.fps,
@@ -187,7 +188,7 @@ async function main() {
     check('score climbs during play', play.peak > 5, `peak=${play.peak}`);
     check('HUD score matches the simulation', Number(play.hudScore.replace(/,/g, '')) === play.score,
       `hud=${play.hudScore} world=${play.score}`);
-    check('energy is being collected', play.energy > 0 || play.peak > 5, `energy=${play.energy}`);
+    check('shards are being collected', play.shards > 0 || play.peak > 5, `shards=${play.shards}`);
     check('the loop holds up under load', play.fps > 25, `fps=${play.fps.toFixed(1)}`);
     await page.screenshot({ path: `${SHOTS}/03-gameplay.png` });
 
@@ -216,46 +217,115 @@ async function main() {
     const over = await page.evaluate(() => ({
       score: Number(document.getElementById('over-score').textContent.replace(/,/g, '')),
       best: document.getElementById('over-best').textContent,
+      zone: document.getElementById('over-zone').textContent,
+      mult: document.getElementById('over-mult').textContent,
+      perfects: document.getElementById('over-perfects').textContent,
+      orbs: document.getElementById('over-orbs').textContent,
+      greed: document.getElementById('over-greed').textContent,
+      missions: document.querySelectorAll('#over-missions .mission').length,
       stored: JSON.parse(localStorage.getItem('orbital-rush/profile/v1') || 'null'),
     }));
     check('result score is shown', over.score > 0, `score=${over.score}`);
+    check('the summary reports the whole run',
+      over.zone !== '' && over.mult.startsWith('x') && over.perfects !== '' && over.orbs !== '',
+      `zone=${over.zone} mult=${over.mult} perfects=${over.perfects} orbs=${over.orbs}`);
+    check('safe vs greed is broken out', /greed/i.test(over.greed), over.greed);
+    check('missions are shown on the summary', over.missions === 3, `found ${over.missions}`);
     check('profile was written to storage', !!over.stored && over.stored.bestScore === over.score,
       `bestScore=${over.stored?.bestScore} score=${over.score}`);
     check('run counted in lifetime stats', over.stored.runs === 1, `runs=${over.stored?.runs}`);
+    check('save is on the current schema', over.stored.version === 2, `version=${over.stored?.version}`);
+    check('the daily login bonus was granted', over.stored.shards > 0, `shards=${over.stored?.shards}`);
     await page.screenshot({ path: `${SHOTS}/05-gameover.png` });
+
+    console.log('\ninstant retry');
+    const retryStart = Date.now();
+    await page.locator('#btn-again').click();
+    await page.waitForFunction(() => globalThis.__ORBITAL__.mode === 'play', null, { timeout: 3000 });
+    check('TRY AGAIN is back in play in under a second', Date.now() - retryStart < 1000,
+      `${Date.now() - retryStart}ms`);
+    check('the ghost of the previous run is available',
+      await page.evaluate(() => globalThis.__ORBITAL__.ghost.available));
+    await page.evaluate(() => {
+      const g = globalThis.__ORBITAL__;
+      g.world._onCollision(g.world.rings[0], g.world.player.angle);
+    });
+    await page.waitForSelector('#screen-over.on', { timeout: 6000 });
 
     console.log('\nmenus');
     await page.locator('#btn-over-home').click();
     await page.waitForSelector('#screen-title.on', { timeout: 3000 });
     await page.locator('#btn-shop').click();
     await page.waitForSelector('#screen-shop.on', { timeout: 3000 });
-    const skinCount = await page.locator('#skin-grid .skin').count();
+    const skinCount = await page.locator('#shop-grid .skin').count();
     check('shop lists every skin', skinCount === 12, `found ${skinCount}`);
-    check('starter skin is equipped', await page.locator('#skin-grid .skin.equipped').count() === 1);
+    check('starter skin is equipped', await page.locator('#shop-grid .skin.equipped').count() === 1);
+    check('the shop has three categories', await page.locator('#shop-tabs .tab').count() === 3);
+    // Scan the item cards, not the footer — the footer says "no loot boxes",
+    // which is the promise, not a violation of it.
+    check('no loot boxes, chests or countdowns among the shop items',
+      !/chest|crate|loot|timer|hurry|only \d+ left|ends in/i.test(
+        await page.locator('#shop-grid').innerText(),
+      ));
     await page.screenshot({ path: `${SHOTS}/06-shop.png` });
 
+    await page.locator('#shop-tabs .tab').nth(1).click();
+    const trailCount = await page.locator('#shop-grid .skin').count();
+    check('the trails tab has its own items', trailCount >= 4 && trailCount !== skinCount,
+      `found ${trailCount}`);
+
     await page.locator('#btn-shop-back').click();
-    await page.locator('#btn-missions').click();
-    await page.waitForSelector('#screen-missions.on', { timeout: 3000 });
+    await page.locator('#btn-daily-open').click();
+    await page.waitForSelector('#screen-daily.on', { timeout: 3000 });
     const missionCount = await page.locator('#mission-list .mission').count();
     check('three daily missions are offered', missionCount === 3, `found ${missionCount}`);
-    await page.screenshot({ path: `${SHOTS}/07-missions.png` });
+    check('the daily seed is shown', /^#\d{5}$/.test(await page.locator('#daily-seed').innerText()));
+    check('the local board is labelled honestly',
+      !/world|global|everyone else/i.test(await page.locator('#screen-daily').innerText()));
+    await page.screenshot({ path: `${SHOTS}/07-daily.png` });
 
-    const before = await page.evaluate(() => globalThis.__ORBITAL__.profile.energy);
-    await page.locator('#btn-daily').click();
-    const after = await page.evaluate(() => globalThis.__ORBITAL__.profile.energy);
-    check('daily bonus can be claimed once', after > before, `${before} -> ${after}`);
-    check('daily bonus button disables after claiming',
-      await page.locator('#btn-daily').isDisabled());
+    console.log('\ndaily run');
+    await page.locator('#btn-daily-play').click();
+    await page.waitForFunction(() => globalThis.__ORBITAL__.mode === 'play', null, { timeout: 3000 });
+    const dailyState = await page.evaluate(async () => {
+      const g = globalThis.__ORBITAL__;
+      const { dailySeedFor } = await import('./src/game/daily.js');
+      return { mode: g.runMode, seed: g.world.seed, expected: dailySeedFor() };
+    });
+    check('the daily run uses the date-derived seed',
+      dailyState.mode === 'daily' && dailyState.seed === dailyState.expected,
+      `${dailyState.seed} vs ${dailyState.expected}`);
+    await page.evaluate(() => {
+      const g = globalThis.__ORBITAL__;
+      g.world._onCollision(g.world.rings[0], g.world.player.angle);
+    });
+    await page.waitForSelector('#screen-over.on', { timeout: 6000 });
+    check('the daily summary is labelled as such',
+      (await page.locator('#over-mode').innerText()).includes('DAILY'));
+    check('a daily run cannot be revived', await page.locator('#btn-revive').evaluate((el) => el.classList.contains('hidden')));
+    await page.locator('#btn-over-home').click();
 
-    await page.locator('#btn-missions-back').click();
+    console.log('\ncollection');
+    await page.locator('#btn-collection').click();
+    await page.waitForSelector('#screen-collection.on', { timeout: 3000 });
+    check('the collection lists every cosmetic',
+      await page.locator('#collection-grid .chip').count() === 24,
+      `found ${await page.locator('#collection-grid .chip').count()}`);
+    check('achievements are listed', await page.locator('#achievement-list .ach').count() === 12);
+    await page.screenshot({ path: `${SHOTS}/08-collection.png` });
+
+    await page.locator('#btn-collection-back').click();
     await page.locator('#btn-settings').click();
     await page.waitForSelector('#screen-settings.on', { timeout: 3000 });
     await page.locator('#sw-music').click();
     const musicOff = await page.evaluate(() => globalThis.__ORBITAL__.profile.music);
     check('settings toggles update the profile', musicOff === false, `music=${musicOff}`);
     await page.locator('#sw-music').click();
-    await page.screenshot({ path: `${SHOTS}/08-settings.png` });
+    check('no advertising anywhere in the app',
+      !/\bads?\b(?!\.)|advert|sponsor/i.test(
+        (await page.locator('#screen-settings').innerText()).replace(/NO ADS\. JUST PLAY\./i, ''),
+      ));
+    await page.screenshot({ path: `${SHOTS}/09-settings.png` });
 
     console.log('\npersistence');
     await page.reload({ waitUntil: 'load' });
@@ -263,14 +333,17 @@ async function main() {
     const reloaded = await page.evaluate(() => ({
       best: globalThis.__ORBITAL__.profile.bestScore,
       runs: globalThis.__ORBITAL__.profile.runs,
-      energy: globalThis.__ORBITAL__.profile.energy,
+      shards: globalThis.__ORBITAL__.profile.shards,
+      ghost: !!globalThis.__ORBITAL__.profile.ghost,
+      coached: (globalThis.__ORBITAL__.profile.tutorialSeen || []).length,
       titleBest: document.getElementById('title-best').textContent,
     }));
-    check('best score survives a reload', reloaded.best === over.score, `${reloaded.best} vs ${over.score}`);
+    check('best score survives a reload', reloaded.best >= over.score, `${reloaded.best} vs ${over.score}`);
     check('title screen shows the stored best',
       Number(reloaded.titleBest.replace(/,/g, '')) === reloaded.best);
-    check('energy survives a reload', reloaded.energy > 0, `energy=${reloaded.energy}`);
-    check('tutorial is not shown again', await page.evaluate(() => globalThis.__ORBITAL__.profile.seenTutorial));
+    check('shards survive a reload', reloaded.shards > 0, `shards=${reloaded.shards}`);
+    check('the personal-best ghost was saved', reloaded.ghost);
+    check('coaching lines are not repeated', reloaded.coached > 0, `seen=${reloaded.coached}`);
 
     console.log('\nresponsive layout');
     for (const [label, size] of [['small-phone', { width: 320, height: 568 }],
@@ -287,7 +360,7 @@ async function main() {
         `overflow ${overflow.x}x${overflow.y}`);
       check(`canvas fills the viewport at ${label}`, Math.abs(overflow.canvasW - size.width) <= 1,
         `canvas=${overflow.canvasW}`);
-      await page.screenshot({ path: `${SHOTS}/09-${label}.png` });
+      await page.screenshot({ path: `${SHOTS}/10-${label}.png` });
     }
 
     check('no runtime errors were logged', problems.length === 0, problems.join(' | '));

@@ -32,7 +32,7 @@
 
 import { RNG } from '../engine/rng.js';
 import { TAU, wrap, angleDist, clamp, lerp } from '../engine/util.js';
-import { TUNE, ZONES, difficultyAt, zoneIndexAt, lapAt } from './config.js';
+import { TUNE, ZONES, OVERDRIVE_AT, difficultyAt, zoneIndexAt, lapAt } from './config.js';
 
 export const EVT = {
   FLIP: 'flip',
@@ -42,6 +42,8 @@ export const EVT = {
   ORB: 'orb',
   POWERUP: 'powerup',
   COMBO_BREAK: 'comboBreak',
+  MULTIPLIER: 'multiplier',
+  OVERDRIVE: 'overdrive',
   SHIELD_BREAK: 'shieldBreak',
   HIT: 'hit',
   ZONE: 'zone',
@@ -82,9 +84,18 @@ export class World {
     this.score = 0;
     this.combo = 0;
     this.bestCombo = 0;
-    this.energy = 0;
+    this.shards = 0;
     this.orbsCollected = 0;
+    this.greedOrbs = 0;
+    this.safeOrbs = 0;
     this.perfects = 0;
+    this.bestMultiplier = 1;
+    this.bestChain = 0;
+    this.overdriveRings = 0;
+    // Zone reached before the player ever picked up a shield, for the
+    // "bare handed" mission and achievement.
+    this.shieldTaken = false;
+    this.noShieldZone = 0;
     this.zone = 0;
     this.lap = 0;
 
@@ -116,6 +127,11 @@ export class World {
 
   get difficulty() {
     return difficultyAt(this.score);
+  }
+
+  /** x8: the run is in OVERDRIVE. Purely a state to feel, never a free pass. */
+  get overdrive() {
+    return this.multiplier >= OVERDRIVE_AT;
   }
 
   /** A shield is up while it still has charges left. */
@@ -293,7 +309,7 @@ export class World {
     // required minimum, plus half the human margin. Reaching for it always
     // costs something, and never costs everything — even on a gap that is
     // already as tight as the generator will allow.
-    ring.slack = (half - floor) + TUNE.gapMargin * 0.5;
+    ring.slack = (half - floor) + TUNE.gapMargin * 0.6;
 
     for (let i = 0; i < gapCount; i++) {
       ring.gaps.push({ c: wrap((TAU / gapCount) * i + rng.range(-0.16, 0.16)), half });
@@ -327,10 +343,21 @@ export class World {
 
     if (!rng.chance(TUNE.orbChance)) return;
     const gi = rng.int(0, ring.gaps.length - 1);
-    // Off-centre by as much as the gap can spare, so collecting energy costs
-    // precision on a wide ring and is free on none.
-    const offset = rng.range(-0.75, 0.75) * ring.slack;
-    ring.orbs.push({ gapIndex: gi, offset, type: 'energy', taken: false });
+    // The heart of the game: an orb is either sitting near the safe line, or
+    // out where taking it costs most of your margin. Draw from the two ends
+    // rather than uniformly, so most rings pose an actual question instead of
+    // a shrug. `risk` is a fraction of what this gap can spare, so a tight
+    // ring can never offer a greed orb it has no room for.
+    const risk = rng.chance(0.45) ? rng.range(0.55, 1) : rng.range(0, 0.35);
+    const offset = rng.sign() * risk * TUNE.orbReach * ring.slack;
+    ring.orbs.push({
+      gapIndex: gi,
+      offset,
+      risk,
+      greed: risk >= TUNE.greedThreshold,
+      type: 'shard',
+      taken: false,
+    });
   }
 
   /**
@@ -504,16 +531,27 @@ export class World {
       const oa = wrap(rot + World.gapCenterAt(ring, orb.gapIndex, travel) + orb.offset);
       if (angleDist(angle, oa) > ORB_TOLERANCE) continue;
       orb.taken = true;
-      if (orb.type === 'energy') {
+      if (orb.type === 'shard') {
+        const before = this.multiplier;
         this.orbsCollected++;
-        this.combo++;
+        if (orb.greed) this.greedOrbs++;
+        else this.safeOrbs++;
+        // A greed orb is worth two links of chain as well as double the
+        // shards — it is the only fast way to x8.
+        this.combo += orb.greed ? 2 : 1;
         this.bestCombo = Math.max(this.bestCombo, this.combo);
-        const gain = this.multiplier;
-        this.energy += gain;
+        this.bestChain = this.bestCombo;
+        const gain = this.multiplier * (orb.greed ? TUNE.greedBonus : 1);
+        this.shards += gain;
         ring.collected++;
-        this.emit(EVT.ORB, { angle: oa, gain, combo: this.combo, multiplier: this.multiplier });
+        this.bestMultiplier = Math.max(this.bestMultiplier, this.multiplier);
+        this.emit(EVT.ORB, {
+          angle: oa, gain, combo: this.combo, multiplier: this.multiplier, greed: !!orb.greed,
+        });
+        this._multiplierChanged(before);
       } else {
         ring.power = orb.type;
+        if (orb.type === 'shield') this.shieldTaken = true;
         this._grantPower(orb.type);
         this.emit(EVT.POWERUP, { angle: oa, kind: orb.type });
       }
@@ -532,14 +570,17 @@ export class World {
     const isPerfect = precision >= TUNE.perfectThreshold;
     const collected = ring.collected;
 
-    if (collected === 0 && this.combo > 0 && ring.orbs.some((o) => o.type === 'energy')) {
+    if (collected === 0 && this.combo > 0 && ring.orbs.some((o) => o.type === 'shard')) {
+      const before = this.multiplier;
+      const lost = this.combo;
       this.combo = 0;
-      this.emit(EVT.COMBO_BREAK);
+      this.emit(EVT.COMBO_BREAK, { lost, from: before });
+      this._multiplierChanged(before);
     }
 
     if (isPerfect) {
       this.perfects++;
-      this.energy += 1;
+      this.shards += 1;
       this.emit(EVT.PERFECT, { angle: this.player.angle, precision });
     } else if (precision < 0.16) {
       this.emit(EVT.NEAR, { angle: this.player.angle });
@@ -555,10 +596,21 @@ export class World {
       power: ring.power,
     });
 
+    if (this.overdrive) this.overdriveRings++;
+    if (!this.shieldTaken) this.noShieldZone = Math.max(this.noShieldZone, this.zone);
+
     const zoneNow = zoneIndexAt(this.score);
     if (zoneNow !== zoneIndexAt(Math.max(0, this.score - gained))) {
       this.emit(EVT.ZONE, { zone: zoneNow, lap: lapAt(this.score) });
     }
+  }
+
+  /** Announce a multiplier change once, and OVERDRIVE the first time it lands. */
+  _multiplierChanged(before) {
+    const now = this.multiplier;
+    if (now === before) return;
+    this.emit(EVT.MULTIPLIER, { value: now, previous: before, rising: now > before });
+    if (now >= OVERDRIVE_AT && before < OVERDRIVE_AT) this.emit(EVT.OVERDRIVE, { value: now });
   }
 
   _grantPower(kind) {

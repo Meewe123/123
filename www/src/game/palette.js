@@ -10,10 +10,17 @@
 
 const HUE_KEYS = ['ring', 'ringDim', 'orb'];
 
-/** Minimum hue separation, in degrees, between the player and each element. */
+/**
+ * Minimum hue separation, in degrees, between the player and each element.
+ *
+ * Rings get the smaller push on purpose: enough that the player never
+ * disappears into one, small enough that a zone still looks like itself when
+ * you happen to equip a skin in its own colours. Orbs get more, because
+ * mistaking an orb for the player is a mistake that costs a run.
+ */
 const SEPARATION = {
-  ring: 46,
-  ringDim: 46,
+  ring: 28,
+  ringDim: 28,
   orb: 40,
 };
 

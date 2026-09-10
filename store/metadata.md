@@ -11,7 +11,7 @@ are Apple's; the counts in brackets are what the current text uses.
 
 ## Subtitle (30 max)
 
-`One tap. One orbit. No brakes.` [30]
+`Play it safe or take the orb.` [29]
 
 ## Bundle ID
 
@@ -38,84 +38,89 @@ pointing at third-party content, no gambling, no in-app purchases.
 
 ## Promotional text (170 max, editable without a new build)
 
-`New: eight hand-tuned zones, twelve unlockable trails and a daily run that
-resets at midnight. No ads. No timers. Just you and the next ring.` [147]
+`Now with eight zones that each play, sound and shatter differently, a daily run
+everyone shares, and your own best run racing you as a ghost. Still no ads.` [151]
 
 ---
 
 ## Description (4000 max)
 
 ```
-One thumb. One orbit. Everything else is timing.
+One thumb. One orbit. Everything else is a decision.
 
 You are a spark locked in orbit around a dying star. Rings close in from the
-dark, each with a single way through. Tap to reverse your direction and thread
-the gap. That is the whole control scheme — and you will still be learning it
-an hour from now.
+dark, each with one way through. Tap to reverse direction and thread the gap.
+That is the whole control scheme - and you will still be learning it an hour
+from now.
 
-THREE SECONDS TO LEARN
-No tutorials to sit through, no menus to dig into. Open the app, tap, play.
-A run starts in under a second and ends the moment you clip a ring, so "one
-more go" costs you nothing.
+SAFE, OR GREED
+Inside most gaps sits an orb. Some sit near the safe line and cost you nothing.
+Others sit right out at the edge, where taking one eats almost all of your
+margin - and pays double, and pushes your chain twice as far. That is the game:
+every few seconds, a small, clear, honest question. Play it safe and survive.
+Reach for it and climb.
 
-A GAUNTLET THAT KEEPS CHANGING
-Eight zones cycle as you climb: rings that reverse mid-approach, twins that
-arrive back to back, gaps that drift while you aim for them, and ghost rings
-that only reveal themselves at the last moment. Every ring is generated to be
-passable — if you miss, it is because you were late, not because the game was
-unfair.
+Chain orbs and your multiplier grows to x8, where the run tips into OVERDRIVE
+and the whole screen leans in. Miss one and the chain is gone. Thread a gap dead
+centre for a PERFECT - and every zone has its own.
 
-CHAIN ENERGY, NOT JUST RINGS
-Orbs sit off-centre inside the gaps. Take the safe line and survive; take the
-tight line and build a chain that multiplies everything you collect, up to x8.
-Nail a gap dead centre for a PERFECT and an extra spark. The players at the top
-of the board are not the safest ones.
+EIGHT ZONES THAT ACTUALLY CHANGE
+FLOW to teach you. VOLTAGE, where rings reverse each time. INFERNO, twin rings
+back to back. FROZEN, where they breathe and PERFECTs shatter. DRIFT, where the
+gap slides while you aim. GHOST, where the ring shows up late. STORM. And VOID,
+where almost everything falls away and it is just you and the next ring.
+Different hazard, different particles, different sound, different PERFECT.
 
-POWER-UPS THAT ACTUALLY MATTER
-Shields that eat one mistake. Slow-motion when the walls start closing.
-Double score when you are already on a tear.
+EVERY RING IS PASSABLE
+Not a promise - a property. The generator computes what your body can sweep
+through and what you can reach from where the last gap left you, and refuses to
+place anything tighter. If you miss, you were late. It was never unfair.
 
-TWELVE TRAILS TO EARN
-From Aurora to Nova. Every one is unlocked by playing, not by paying.
+REASONS TO COME BACK
+- Your best run comes back as a ghost and races you.
+- A daily run on a seed everyone shares. One seed, one score.
+- Three missions a day that ask you to play differently.
+- A streak that rewards you and never punishes you.
+- Twenty-four cosmetics across skins, trails and PERFECT effects.
 
 BUILT TO RESPECT YOU
-• No ads. Not banners, not videos, not "watch to continue".
-• No in-app purchases. There is nothing to buy.
-• No account, no sign-in, no email address.
-• No tracking, no analytics, no data leaves your device.
-• No internet connection required — ever.
-• Full support for haptics, and a reduced-effects mode if you prefer calm.
+- No ads. Not banners, not videos, not "watch to continue".
+- No loot boxes, no energy timer, no battle pass, no subscription.
+- One currency, earned by playing. Nothing sold changes how the game plays.
+- No account, no sign-in, no tracking, no data leaving your device.
+- No internet connection required - ever.
 
-Daily missions and a streak counter give you a reason to come back. Your best
-score gives you a reason to stay.
-
-Tap. Reverse. Survive.
+Tap. Reverse. Decide.
 ```
 
 ---
 
 ## Keywords (100 char max, comma separated, no spaces)
 
-`orbit,arcade,onetap,reflex,neon,endless,ring,dodge,offline,noads,highscore,tap,reaction,circle,skill`
+`orbit,arcade,onetap,reflex,neon,endless,ring,dodge,offline,noads,highscore,daily,ghost,skill,risk`
 
 [99 characters]
 
 ---
 
-## What's New (version 1.0.0)
+## What's New (version 1.1.0)
 
 ```
-The first release of Orbital Rush.
+The safe-or-greed update.
 
-• Eight zones, each with its own hazard and its own colour
-• Energy chains, perfect passes and an x8 multiplier
-• Shield, slow-motion and double-score power-ups
-• Twelve unlockable trails
-• Daily missions and a play streak
-• No ads, no purchases, no tracking, fully offline
+- Every orb is now either safe or greed. Greed orbs sit out at the edge of what
+  the gap can spare, pay double, and push your chain twice as fast.
+- x8 now tips the run into OVERDRIVE.
+- All eight zones rebuilt: each has its own hazard, particles, background,
+  synth voice and PERFECT effect.
+- Your best run comes back as a ghost and races you.
+- Daily Run: one seed a day, shared by everyone.
+- New missions that ask you to play differently, and a streak that pays out.
+- Achievements, and cosmetics split into skins, trails and PERFECT effects.
+- A run summary worth reading, and TRY AGAIN in under a second.
+
+Still no ads, no loot boxes and no tracking.
 ```
-
----
 
 ## Support URL
 
@@ -150,11 +155,11 @@ Store Connect accepts:
 
 Suggested caption overlay for each shot (add in your design tool of choice):
 
-1. "One tap. That is the whole game."
-2. "Thread the gap. Chain the orbs."
-3. "Eight zones. Each one bites differently."
-4. "x8 multiplier for the brave."
-5. "Twelve trails, all earned."
+1. "Safe line, or the orb?"
+2. "Eight zones. Each one bites differently."
+3. "x8 tips the run into OVERDRIVE."
+4. "Your best run races you."
+5. "No ads. Nothing to buy to win."
 
 ## App Preview video (optional but strongly recommended)
 
