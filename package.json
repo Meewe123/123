@@ -2,7 +2,7 @@
   "name": "orbital-rush",
   "version": "1.0.0",
   "private": true,
-  "description": "Orbital Rush — a one-thumb neon arcade game. Zero dependencies at runtime.",
+  "description": "Orbital Rush \u2014 a one-thumb neon arcade game. Zero dependencies at runtime.",
   "type": "module",
   "scripts": {
     "dev": "node scripts/serve.mjs",
@@ -12,10 +12,12 @@
     "icons": "python3 tools/make_icons.py",
     "screenshots": "node tools/screenshots.mjs",
     "previews": "python3 tools/make_previews.py",
-    "verify": "npm run icons && npm test && npm run test:e2e",
+    "verify": "npm run icons && npm test && npm run test:e2e && npm run test:bundle",
     "cap:add:ios": "npx cap add ios",
     "cap:sync": "npx cap sync ios",
-    "cap:open": "npx cap open ios"
+    "cap:open": "npx cap open ios",
+    "build:single": "node scripts/build-single.mjs",
+    "test:bundle": "node tests/bundle.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.1",

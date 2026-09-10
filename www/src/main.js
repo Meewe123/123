@@ -616,7 +616,8 @@ ready(() => {
   globalThis.__ORBITAL__ = game; // handle used by the automated smoke tests
   game.boot();
 
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  // The single-file build has no separate sw.js to register.
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !globalThis.__ORBITAL_SINGLE_FILE__) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     });
