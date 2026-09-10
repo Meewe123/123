@@ -5,16 +5,24 @@
  */
 
 export const TUNE = {
-  playerOrbit: 0.40,
-  playerRadius: 0.042,
+  playerOrbit: 0.44,
+  // The player is a lens, not a ball: narrow across the ring it is crossing,
+  // wide along its own orbit. The radial half-extent sets how long a ring
+  // touches the player, which is what the collision test has to survive.
+  playerRadial: 0.018,
+  playerTangential: 0.042,
   spawnRadius: 1.30,
   despawnRadius: 0.05,
-  playerAngularSpeed: 2.45,
-  ringSpeed: 0.40,
-  ringThickness: 0.030,
-  orbRadius: 0.026,
-  baseSpacing: 0.38,
-  minSpacing: 0.30,
+  playerAngularSpeed: 2.20,
+  ringSpeed: 0.42,
+  ringThickness: 0.020,
+  orbRadius: 0.024,
+  baseSpacing: 0.40,
+  minSpacing: 0.32,
+  // Slack on top of the geometric minimum. The minimum only guarantees a gap
+  // is *possible*; this is the room a human's reaction time needs on top of it
+  // (~60 ms of orbit at full speed).
+  gapMargin: 0.17,
   slowFactor: 0.55,
   slowDuration: 4.0,
   doubleDuration: 7.0,
@@ -27,7 +35,6 @@ export const TUNE = {
   orbChance: 0.62,
   powerupEvery: 11,
 };
-
 /**
  * 0..1 difficulty ramp. Tuned so the gap between rings goes 1.0s -> 0.6s over
  * the first hundred rings and then flattens out near 0.4s, which is about as
@@ -55,8 +62,8 @@ export const ZONES = [
     key: -5,
     palette: P('#05121f', '#0a2b45', '#5ff0e0', '#1c6a72', '#ffffff', '#ffe66d', '#0f3a52'),
     gaps: () => 1,
-    gapHalf: 0.62,
-    rot: [0.35, 0.75],
+    gapHalf: 0.85,
+    rot: [0.30, 0.60],
     flags: {},
   },
   {
@@ -65,8 +72,8 @@ export const ZONES = [
     key: -3,
     palette: P('#1c0708', '#42120c', '#ff8a4c', '#8a3418', '#fff1c9', '#ffd166', '#5a2113'),
     gaps: (rng) => (rng.chance(0.35) ? 2 : 1),
-    gapHalf: 0.54,
-    rot: [0.55, 1.05],
+    gapHalf: 0.72,
+    rot: [0.45, 0.85],
     flags: {},
   },
   {
@@ -75,8 +82,8 @@ export const ZONES = [
     key: -7,
     palette: P('#12061f', '#331046', '#c08cff', '#5a2f80', '#ffffff', '#7ef0ff', '#43195c'),
     gaps: () => 1,
-    gapHalf: 0.58,
-    rot: [0.9, 1.5],
+    gapHalf: 0.75,
+    rot: [0.70, 1.15],
     flags: { alternate: true },
   },
   {
@@ -85,8 +92,8 @@ export const ZONES = [
     key: -2,
     palette: P('#03170f', '#07422a', '#4dffa8', '#177a52', '#eafff5', '#ffd166', '#0c5236'),
     gaps: (rng) => (rng.chance(0.4) ? 2 : 1),
-    gapHalf: 0.5,
-    rot: [0.6, 1.2],
+    gapHalf: 0.65,
+    rot: [0.50, 0.95],
     flags: { twin: true },
   },
   {
@@ -95,8 +102,8 @@ export const ZONES = [
     key: 0,
     palette: P('#1b0523', '#4a0b3f', '#ff6fd8', '#8c2b6d', '#fff3fb', '#8affdc', '#61154f'),
     gaps: () => 2,
-    gapHalf: 0.44,
-    rot: [0.7, 1.25],
+    gapHalf: 0.58,
+    rot: [0.55, 1.00],
     flags: { pulse: true },
   },
   {
@@ -105,8 +112,8 @@ export const ZONES = [
     key: -9,
     palette: P('#04070f', '#0d1836', '#9fb8ff', '#33477f', '#ffffff', '#ffe66d', '#1a2a52'),
     gaps: () => 1,
-    gapHalf: 0.56,
-    rot: [0.8, 1.35],
+    gapHalf: 0.70,
+    rot: [0.65, 1.05],
     flags: { ghost: true },
   },
   {
@@ -115,8 +122,8 @@ export const ZONES = [
     key: -4,
     palette: P('#1a1403', '#4a3a06', '#ffd23f', '#8a6a10', '#fffbe6', '#ff7edb', '#5f4a09'),
     gaps: () => 3,
-    gapHalf: 0.32,
-    rot: [1.3, 2.0],
+    gapHalf: 0.45,
+    rot: [1.00, 1.50],
     flags: {},
   },
   {
@@ -125,8 +132,8 @@ export const ZONES = [
     key: -8,
     palette: P('#07060f', '#1d1b3f', '#e6e9ff', '#5a5c8f', '#8affff', '#ff9ecd', '#2b2a55'),
     gaps: (rng) => (rng.chance(0.5) ? 2 : 1),
-    gapHalf: 0.46,
-    rot: [1.0, 1.7],
+    gapHalf: 0.58,
+    rot: [0.80, 1.30],
     flags: { drift: true, alternate: true },
   },
 ];

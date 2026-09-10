@@ -10,18 +10,24 @@
  * The player orbits the centre at a fixed radius and can only reverse
  * direction. Rings close in from outside; each carries one or more gaps.
  *
- * Two properties make the game feel fair, and both are structural rather than
- * tuned by hand:
+ * Three properties make the game feel fair, and all three are structural rather
+ * than tuned by hand:
  *
  * 1. Rings are parameterised by *travel*, not by time. A ring's rotation,
  *    pulse and gap drift are all functions of how far it has moved inward, so
  *    its exact state at the moment it reaches the player's orbit is known the
  *    instant it spawns — no matter how the game speed changes in between.
  *
- * 2. Because of (1), the generator can place every gap inside the arc the
- *    player can actually reach from the previous gap. There is no such thing
- *    as an unwinnable ring; difficulty comes from narrower gaps, faster spin
- *    and tighter timing instead.
+ * 2. Collision is continuous, not a single verdict at the orbit line. A ring
+ *    touches the player for a whole band of travel (the player's radial extent
+ *    plus the ring's thickness), and the player has to be clear of the wall for
+ *    all of it. What you see touching you is what kills you.
+ *
+ * 3. Because of (1) and (2), the generator can compute, per ring, both the arc
+ *    the player can still reach and the narrowest gap their swept body can fit
+ *    through — and refuses to emit anything tighter. There is no unwinnable
+ *    ring; difficulty comes from speed, rotation, gap count and the zone
+ *    hazards instead.
  */
 
 import { RNG } from '../engine/rng.js';
@@ -42,8 +48,21 @@ export const EVT = {
 };
 
 const POWER_ORDER = ['shield', 'slow', 'double'];
-const FORGIVENESS = 0.055;   // radians of "close enough" on a gap edge
-const REACH_SAFETY = 0.72;   // fraction of the reachable arc the generator uses
+
+/** Half the radial span over which a ring is in contact with the player. */
+export const BAND_HALF = TUNE.playerRadial + TUNE.ringThickness / 2;
+/** The player's half-width along its own orbit, in radians. */
+export const PLAYER_HALF = TUNE.playerTangential / TUNE.playerOrbit;
+/** How close an orb has to pass to be collected, in radians. */
+const ORB_TOLERANCE = (TUNE.playerTangential + TUNE.orbRadius) / TUNE.playerOrbit;
+
+/**
+ * Collision is sampled at a fixed resolution in *travel*, never per frame, so
+ * the verdict is identical at 60 Hz, 120 Hz or in a head-less test.
+ */
+const BAND_SAMPLE = 0.0025;
+const EDGE_FORGIVENESS = 0.02;
+const REACH_SAFETY = 0.72;
 
 let nextRingId = 1;
 
@@ -74,7 +93,7 @@ export class World {
     this.rings = [];
     this.spawnCount = 0;
     this.ringsSincePower = 0;
-    this.cursor = TUNE.playerOrbit + 0.40; // travel position of the last spawn
+    this.cursor = TUNE.playerOrbit + 0.40;
     this.lastTargetAngle = this.player.angle;
     this.lastTargetTravel = TUNE.playerOrbit;
 
@@ -99,10 +118,17 @@ export class World {
     return clamp(1 + Math.floor(this.combo / TUNE.comboPerMultiplier), 1, TUNE.maxMultiplier);
   }
 
-  /** How fast rings close in, including the lap bonus and slow-mo. */
+  /**
+   * Slow-motion scales the player and the rings by the same amount, so it buys
+   * the player real time to react without changing any of the geometry.
+   */
+  get timeScale() {
+    return this.slowTimer > 0 ? TUNE.slowFactor : 1;
+  }
+
+  /** How fast rings close in, before slow-motion. */
   get speedScale() {
-    const base = 1 + this.difficulty * 0.85 + Math.min(lapAt(this.score) * 0.06, 0.2);
-    return this.slowTimer > 0 ? base * TUNE.slowFactor : base;
+    return 1 + this.difficulty * 0.85 + Math.min(lapAt(this.score) * 0.06, 0.2);
   }
 
   get playerSpeed() {
@@ -119,10 +145,11 @@ export class World {
     return next ? next.zone : zoneIndexAt(this.score);
   }
 
+  /** The ring the player has to deal with next. */
   nextRing() {
     let best = null;
     for (const r of this.rings) {
-      if (r.state !== 'live' || r.travel < TUNE.playerOrbit) continue;
+      if (r.state !== 'live' && r.state !== 'crossing') continue;
       if (!best || r.travel < best.travel) best = r;
     }
     return best;
@@ -149,7 +176,6 @@ export class World {
 
   // ------------------------------------------------- ring state helpers ---
 
-  /** Pulse offset applied to a ring's radius at a given travel position. */
   static pulseAt(ring, travel) {
     if (!ring.pulseAmp) return 0;
     return Math.sin((ring.spawnTravel - travel) * ring.pulseFreq + ring.pulsePhase) * ring.pulseAmp;
@@ -167,14 +193,18 @@ export class World {
   }
 
   /**
-   * Travel position at which this ring's radius equals the player's orbit.
-   * radius = travel + pulse(travel); two fixed-point steps are plenty because
-   * |d(pulse)/d(travel)| stays well under 1.
+   * Travel position at which this ring's radius equals `target`.
+   * radius = travel + pulse(travel); the pulse slope is bounded well under 1,
+   * so a few fixed-point steps converge.
    */
-  static crossTravel(ring) {
-    let t = TUNE.playerOrbit;
-    for (let i = 0; i < 3; i++) t = TUNE.playerOrbit - World.pulseAt(ring, t);
+  static travelAtRadius(ring, target) {
+    let t = target;
+    for (let i = 0; i < 4; i++) t = target - World.pulseAt(ring, t);
     return t;
+  }
+
+  static crossTravel(ring) {
+    return World.travelAtRadius(ring, TUNE.playerOrbit);
   }
 
   // ------------------------------------------------------------ spawning ---
@@ -183,21 +213,35 @@ export class World {
     return lerp(TUNE.baseSpacing, TUNE.minSpacing, this.difficulty);
   }
 
+  /**
+   * The narrowest gap this ring may have. While a ring crosses the player it
+   * sweeps past them: the player keeps orbiting, the ring keeps rotating, and a
+   * drifting gap keeps moving. The gap has to be wide enough to contain all of
+   * that plus the player's own width, or the ring would be impossible to pass
+   * however well it was timed.
+   */
+  _minGapHalf(ring) {
+    const band = 2 * BAND_HALF;
+    // A pulsing ring lingers in the band; its radius falls more slowly where
+    // the pulse is rising.
+    const stretch = 1 / Math.max(0.4, 1 - ring.pulseAmp * ring.pulseFreq);
+    const span = band * stretch;
+    const seconds = span / (TUNE.ringSpeed * this.speedScale);
+    const sweep = this.playerSpeed * seconds
+      + Math.abs(ring.rotRate) * span
+      + ring.driftAmp * ring.driftFreq * span;
+    return PLAYER_HALF + sweep / 2 + TUNE.gapMargin;
+  }
+
   _makeRing(travel, zoneIndex, opts = {}) {
     const rng = this.rng;
     const zone = ZONES[zoneIndex];
     const d = this.difficulty;
     const gapCount = opts.gapCount ?? zone.gaps(rng, d);
-    const half = Math.max(0.22, zone.gapHalf * lerp(1, 0.76, d) * (opts.halfScale ?? 1));
-
-    const gaps = [];
-    for (let i = 0; i < gapCount; i++) {
-      gaps.push({ c: wrap((TAU / gapCount) * i + rng.range(-0.16, 0.16)), half });
-    }
 
     let dirSign = rng.sign();
     if (zone.flags.alternate) dirSign = this.spawnCount % 2 === 0 ? 1 : -1;
-    const rotPerSecond = rng.range(zone.rot[0], zone.rot[1]) * (0.85 + d * 0.45) * dirSign;
+    const rotPerSecond = rng.range(zone.rot[0], zone.rot[1]) * (0.85 + d * 0.30) * dirSign;
 
     const ring = {
       id: nextRingId++,
@@ -206,17 +250,17 @@ export class World {
       radius: travel,
       prevRadius: travel,
       rot0: rng.range(0, TAU),
-      // Expressed per unit of travel so the ring's state at the orbit is fixed.
+      // Per unit of travel, so the ring's state at the orbit is fixed at spawn.
       rotRate: rotPerSecond / TUNE.ringSpeed,
       rot: 0,
-      gaps,
+      gaps: [],
       thickness: TUNE.ringThickness,
       orbs: [],
       zone: zoneIndex,
       state: 'live',
       ghost: !!zone.flags.ghost,
-      pulseAmp: zone.flags.pulse ? 0.032 : 0,
-      pulseFreq: rng.range(9, 15),
+      pulseAmp: zone.flags.pulse ? 0.018 : 0,
+      pulseFreq: rng.range(6, 10),
       pulsePhase: rng.range(0, TAU),
       driftAmp: zone.flags.drift ? rng.range(0.16, 0.30) : 0,
       driftFreq: rng.range(2.5, 4.5),
@@ -225,7 +269,22 @@ export class World {
       hitFlash: 0,
       targetGap: 0,
       targetAngle: 0,
+      slack: 0,
+      collected: 0,
+      power: null,
+      centreBest: Infinity,
+      centreDist: 0,
+      centreHalf: 1,
     };
+
+    const wanted = zone.gapHalf * lerp(1, 0.76, d) * (opts.halfScale ?? 1);
+    const floor = this._minGapHalf(ring);
+    const half = Math.max(floor, wanted);
+    ring.slack = half - (floor - TUNE.gapMargin);
+
+    for (let i = 0; i < gapCount; i++) {
+      ring.gaps.push({ c: wrap((TAU / gapCount) * i + rng.range(-0.16, 0.16)), half });
+    }
     ring.rot = World.rotAt(ring, travel);
 
     this._populateOrbs(ring, opts);
@@ -245,8 +304,9 @@ export class World {
 
     if (!rng.chance(TUNE.orbChance)) return;
     const gi = rng.int(0, ring.gaps.length - 1);
-    // Off-centre, so collecting energy costs precision rather than being free.
-    const offset = rng.range(-0.55, 0.55) * ring.gaps[gi].half;
+    // Off-centre by as much as the gap can spare, so collecting energy costs
+    // precision on a wide ring and is free on none.
+    const offset = rng.range(-0.7, 0.7) * ring.slack;
     ring.orbs.push({ gapIndex: gi, offset, type: 'energy', taken: false });
   }
 
@@ -316,10 +376,14 @@ export class World {
     if (this.slowTimer > 0) this.slowTimer = Math.max(0, this.slowTimer - dt);
     if (this.doubleTimer > 0) this.doubleTimer = Math.max(0, this.doubleTimer - dt);
 
-    const pSpeed = this.playerSpeed;
-    this.player.angle = wrap(this.player.angle + this.player.dir * pSpeed * dt);
+    const ts = this.timeScale;
+    const prevAngle = this.player.angle;
+    const angleDelta = this.player.dir * this.playerSpeed * ts * dt;
+    this.player.angle = wrap(prevAngle + angleDelta);
 
-    const step = TUNE.ringSpeed * this.speedScale * dt;
+    const step = TUNE.ringSpeed * this.speedScale * ts * dt;
+    const outer = TUNE.playerOrbit + BAND_HALF;
+    const inner = TUNE.playerOrbit - BAND_HALF;
 
     for (let i = this.rings.length - 1; i >= 0; i--) {
       const r = this.rings[i];
@@ -334,9 +398,10 @@ export class World {
         ? clamp((0.88 - r.travel) / 0.15, 0, 1)
         : clamp((TUNE.spawnRadius + 0.08 - r.travel) / 0.18, 0, 1);
 
-      if (r.state === 'live' && r.prevRadius > TUNE.playerOrbit && r.radius <= TUNE.playerOrbit) {
-        this._resolveCrossing(r, prevTravel, dt, pSpeed);
+      if ((r.state === 'live' || r.state === 'crossing') && r.radius <= outer) {
+        this._sweepBand(r, prevTravel, prevAngle, angleDelta, outer, inner);
         if (!this.alive) return;
+        if (r.state === 'crossing' && r.radius < inner) this._clearRing(r);
       }
 
       if (r.travel < -TUNE.despawnRadius) this.rings.splice(i, 1);
@@ -348,65 +413,93 @@ export class World {
   }
 
   /**
-   * Solve the exact instant the ring's radius met the orbit, rewind both the
-   * ring and the player to that instant, then judge the pass.
+   * Walk the part of this step during which the ring overlapped the player,
+   * sampling at a fixed resolution in travel. The player's angle is linear in
+   * time within a step, so interpolating it is exact — which is what makes the
+   * result independent of the frame rate.
    */
-  _resolveCrossing(ring, prevTravel, dt, pSpeed) {
-    const span = ring.prevRadius - ring.radius;
-    const f = span > 1e-9 ? clamp((ring.prevRadius - TUNE.playerOrbit) / span, 0, 1) : 1;
-    const back = (1 - f) * dt;
+  _sweepBand(ring, prevTravel, prevAngle, angleDelta, outer, inner) {
+    const enter = World.travelAtRadius(ring, outer);
+    const exit = World.travelAtRadius(ring, inner);
+    const hi = Math.min(prevTravel, enter);
+    const lo = Math.max(ring.travel, exit);
+    if (hi < lo) return;
 
-    const travelAt = lerp(prevTravel, ring.travel, f);
-    const ringRot = World.rotAt(ring, travelAt);
-    const pAngle = wrap(this.player.angle - this.player.dir * pSpeed * back);
-    const rel = wrap(pAngle - ringRot);
+    ring.state = 'crossing';
+    const stepSpan = prevTravel - ring.travel;
+    const samples = Math.max(2, Math.ceil((hi - lo) / BAND_SAMPLE) + 1);
 
-    let bestDist = Infinity;
-    let bestHalf = 1;
-    for (let i = 0; i < ring.gaps.length; i++) {
-      const d = angleDist(rel, World.gapCenterAt(ring, i, travelAt));
-      if (d < bestDist) {
-        bestDist = d;
-        bestHalf = ring.gaps[i].half;
+    for (let i = 0; i < samples; i++) {
+      const t = hi - ((hi - lo) * i) / (samples - 1);
+      const f = stepSpan > 1e-9 ? clamp((prevTravel - t) / stepSpan, 0, 1) : 1;
+      const angle = wrap(prevAngle + angleDelta * f);
+      const rot = World.rotAt(ring, t);
+      const rel = wrap(angle - rot);
+
+      let clearance = -Infinity;
+      let nearestDist = Infinity;
+      let nearestHalf = 1;
+      for (let g = 0; g < ring.gaps.length; g++) {
+        const dist = angleDist(rel, World.gapCenterAt(ring, g, t));
+        const half = ring.gaps[g].half;
+        if (half - PLAYER_HALF - dist > clearance) clearance = half - PLAYER_HALF - dist;
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestHalf = half;
+        }
+      }
+
+      if (clearance < -EDGE_FORGIVENESS) {
+        this._onCollision(ring, angle);
+        return;
+      }
+
+      // Remember how centred the player was at the closest approach; that is
+      // what a PERFECT is measured against.
+      const offCentre = Math.abs(t + World.pulseAt(ring, t) - TUNE.playerOrbit);
+      if (offCentre < ring.centreBest) {
+        ring.centreBest = offCentre;
+        ring.centreDist = nearestDist;
+        ring.centreHalf = nearestHalf;
+      }
+
+      this._collectOrbs(ring, t, rot, angle);
+    }
+  }
+
+  _collectOrbs(ring, travel, rot, angle) {
+    for (const orb of ring.orbs) {
+      if (orb.taken) continue;
+      const oa = wrap(rot + World.gapCenterAt(ring, orb.gapIndex, travel) + orb.offset);
+      if (angleDist(angle, oa) > ORB_TOLERANCE) continue;
+      orb.taken = true;
+      if (orb.type === 'energy') {
+        this.orbsCollected++;
+        this.combo++;
+        this.bestCombo = Math.max(this.bestCombo, this.combo);
+        const gain = this.multiplier;
+        this.energy += gain;
+        ring.collected++;
+        this.emit(EVT.ORB, { angle: oa, gain, combo: this.combo, multiplier: this.multiplier });
+      } else {
+        ring.power = orb.type;
+        this._grantPower(orb.type);
+        this.emit(EVT.POWERUP, { angle: oa, kind: orb.type });
       }
     }
+  }
 
-    if (bestDist > bestHalf + FORGIVENESS) {
-      this._onCollision(ring, pAngle);
-      return;
-    }
-
+  /** The ring is fully behind the player: score it. */
+  _clearRing(ring) {
     ring.state = 'passed';
     const gained = this.doubleTimer > 0 ? 2 : 1;
     this.score += gained;
     this.zone = zoneIndexAt(this.score);
     this.lap = lapAt(this.score);
 
-    const precision = 1 - clamp(bestDist / bestHalf, 0, 1);
+    const precision = 1 - clamp(ring.centreDist / ring.centreHalf, 0, 1);
     const isPerfect = precision >= TUNE.perfectThreshold;
-
-    let collected = 0;
-    let powerTaken = null;
-    const tol = (TUNE.playerRadius + TUNE.orbRadius) / TUNE.playerOrbit;
-    for (const orb of ring.orbs) {
-      if (orb.taken) continue;
-      const oa = wrap(ringRot + World.gapCenterAt(ring, orb.gapIndex, travelAt) + orb.offset);
-      if (angleDist(pAngle, oa) > tol) continue;
-      orb.taken = true;
-      if (orb.type === 'energy') {
-        collected++;
-        this.orbsCollected++;
-        this.combo++;
-        this.bestCombo = Math.max(this.bestCombo, this.combo);
-        const gain = this.multiplier;
-        this.energy += gain;
-        this.emit(EVT.ORB, { angle: oa, gain, combo: this.combo, multiplier: this.multiplier });
-      } else {
-        powerTaken = orb.type;
-        this._grantPower(orb.type);
-        this.emit(EVT.POWERUP, { angle: oa, kind: orb.type });
-      }
-    }
+    const collected = ring.collected;
 
     if (collected === 0 && this.combo > 0 && ring.orbs.some((o) => o.type === 'energy')) {
       this.combo = 0;
@@ -416,19 +509,19 @@ export class World {
     if (isPerfect) {
       this.perfects++;
       this.energy += 1;
-      this.emit(EVT.PERFECT, { angle: pAngle, precision });
+      this.emit(EVT.PERFECT, { angle: this.player.angle, precision });
     } else if (precision < 0.16) {
-      this.emit(EVT.NEAR, { angle: pAngle });
+      this.emit(EVT.NEAR, { angle: this.player.angle });
     }
 
     this.emit(EVT.PASS, {
-      angle: pAngle,
+      angle: this.player.angle,
       ring,
       score: this.score,
       precision,
       perfect: isPerfect,
       collected,
-      power: powerTaken,
+      power: ring.power,
     });
 
     const zoneNow = zoneIndexAt(this.score);

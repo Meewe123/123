@@ -391,7 +391,10 @@ export class Renderer {
     const a = world.player.angle;
     const x = this.cx + Math.cos(a) * orbit;
     const y = this.cy + Math.sin(a) * orbit;
-    const r = TUNE.playerRadius * u;
+    // The body is drawn at exactly its collision size: wide along the orbit,
+    // narrow across it. What touches a ring is what the simulation tests.
+    const r = TUNE.playerTangential * u;
+    const flatten = TUNE.playerRadial / TUNE.playerTangential;
 
     this.trail.push({ x, y });
     while (this.trail.length > TRAIL_LEN) this.trail.shift();
@@ -408,7 +411,7 @@ export class Renderer {
         for (let i = 1; i < this.trail.length; i++) ctx.lineTo(this.trail[i].x, this.trail[i].y);
         ctx.strokeStyle = skin.trail;
         ctx.globalAlpha = pass === 0 ? 0.16 : 0.4;
-        ctx.lineWidth = pass === 0 ? r * 2.1 : r * 0.75;
+        ctx.lineWidth = pass === 0 ? r * 1.5 : r * 0.55;
         ctx.stroke();
       }
       ctx.restore();
@@ -430,27 +433,28 @@ export class Renderer {
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 4.5);
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.4);
     g.addColorStop(0, skin.glow);
     g.addColorStop(0.25, skin.glow);
     g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.globalAlpha = 0.5;
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(x, y, r * 4.5, 0, TAU);
+    ctx.arc(x, y, r * 3.4, 0, TAU);
     ctx.fill();
     ctx.restore();
 
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(a + Math.PI / 2);
-    ctx.scale(squash, 2 - squash);
+    // Local x runs along the orbit, local y across it.
+    ctx.scale(squash, flatten * (2 - squash));
 
     ctx.fillStyle = skin.glow;
-    this._shapePath(ctx, skin.shape, r * 1.28);
+    this._shapePath(ctx, skin.shape, r);
     ctx.fill();
     ctx.fillStyle = skin.core;
-    this._shapePath(ctx, skin.shape, r * 0.72);
+    this._shapePath(ctx, skin.shape, r * 0.52);
     ctx.fill();
     ctx.restore();
 
@@ -461,11 +465,14 @@ export class Renderer {
         ? 0.4 + 0.6 * Math.abs(Math.sin(world.time * 22))
         : 0.75 + 0.25 * Math.sin(world.time * 5);
       ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(a + Math.PI / 2);
+      ctx.scale(1, Math.max(flatten, 0.55));
       ctx.globalAlpha = pulse;
       ctx.strokeStyle = POWERUPS.shield.color;
-      ctx.lineWidth = Math.max(1.5, r * 0.22);
+      ctx.lineWidth = Math.max(1.5, r * 0.16);
       ctx.beginPath();
-      ctx.arc(x, y, r * 2.0, 0, TAU);
+      ctx.arc(0, 0, r * 1.7, 0, TAU);
       ctx.stroke();
       ctx.globalAlpha = pulse * 0.25;
       ctx.fillStyle = POWERUPS.shield.color;

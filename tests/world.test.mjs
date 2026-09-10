@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { World, EVT } from '../www/src/game/world.js';
+import { World, EVT, BAND_HALF, PLAYER_HALF } from '../www/src/game/world.js';
 import { TUNE, ZONES, difficultyAt, zoneIndexAt } from '../www/src/game/config.js';
 import { angleDist, wrap } from '../www/src/engine/util.js';
 import { createAutopilot, stepAutopilot } from '../www/src/game/autopilot.js';
@@ -130,50 +130,71 @@ test('a shield absorbs exactly one hit', () => {
   assert.equal(w.alive, false, 'the second hit ends the run');
 });
 
-test('slow-mo reduces ring speed while it lasts', () => {
+test('slow-motion slows the whole world, leaving the geometry unchanged', () => {
   const w = new World(31);
-  const normal = w.speedScale;
+  const geometry = w.angularBudgetPerUnit;
+  assert.equal(w.timeScale, 1);
+
   w._grantPower('slow');
   assert.equal(w.slowTimer, TUNE.slowDuration);
-  assert.ok(w.speedScale < normal * 0.7, 'rings slow down');
+  assert.equal(w.timeScale, TUNE.slowFactor);
+  assert.ok(Math.abs(w.angularBudgetPerUnit - geometry) < 1e-9,
+    'slow-motion must not change how far the player can reach per ring');
 
   for (let i = 0; i < 12; i++) w.update(DT);
   assert.ok(w.slowTimer < TUNE.slowDuration, 'the timer runs down');
 
   w.slowTimer = 0;
-  assert.ok(Math.abs(w.speedScale - normal) < 1e-9, 'speed returns to normal when it expires');
+  assert.equal(w.timeScale, 1, 'speed returns to normal when it expires');
 });
 
 test('double score awards two points per ring', () => {
   const w = new World(77);
+  const bot = createAutopilot({ greedy: false });
   w._grantPower('double');
   const before = w.score;
-  const ring = w.rings[0];
-  // Park the player exactly on the aimed gap so the pass is guaranteed.
-  ring.state = 'live';
-  w.player.angle = ring.targetAngle;
-  ring.prevRadius = TUNE.playerOrbit + 0.01;
-  ring.radius = TUNE.playerOrbit - 0.01;
-  ring.travel = TUNE.playerOrbit - 0.01;
-  w._resolveCrossing(ring, TUNE.playerOrbit + 0.01, DT, w.playerSpeed);
-  assert.equal(w.score, before + 2);
+  let gained = -1;
+  for (let i = 0; i < 120 * 20 && w.alive; i++) {
+    stepAutopilot(w, bot);
+    w.update(DT);
+    let passed = false;
+    w.drainEvents((e) => { if (e.type === EVT.PASS) passed = true; });
+    if (passed) { gained = w.score - before; break; }
+  }
+  assert.equal(gained, 2);
 });
 
-test('the energy chain breaks when an orb on a ring is missed', () => {
-  const w = new World(55);
-  w.combo = 6;
-  const ring = w.rings.find((r) => r.orbs.some((o) => o.type === 'energy')) || w.rings[0];
-  ring.orbs = [{ gapIndex: 0, offset: 0, type: 'energy', taken: false }];
-  ring.state = 'live';
-  // Aim at the gap but far enough from the orb to miss it.
-  const centre = ring.targetAngle;
-  w.player.angle = wrap(centre + ring.gaps[ring.targetGap].half * 0.95);
-  ring.prevRadius = TUNE.playerOrbit + 0.01;
-  ring.radius = TUNE.playerOrbit - 0.01;
-  ring.travel = TUNE.playerOrbit - 0.01;
-  w._resolveCrossing(ring, TUNE.playerOrbit + 0.01, DT, w.playerSpeed);
-  assert.equal(w.combo, 0, 'chain resets');
-  assert.ok(w.events.some((e) => e.type === EVT.COMBO_BREAK));
+test('the energy chain survives a collected orb and breaks on a missed one', () => {
+  const missed = new World(55);
+  missed.combo = 6;
+  const a = missed.rings[0];
+  a.orbs = [{ gapIndex: 0, offset: 0, type: 'energy', taken: false }];
+  a.collected = 0;
+  a.centreDist = 0.5;
+  a.centreHalf = 1;
+  missed._clearRing(a);
+  assert.equal(missed.combo, 0, 'missing the orb resets the chain');
+  assert.ok(missed.events.some((e) => e.type === EVT.COMBO_BREAK));
+
+  const kept = new World(55);
+  kept.combo = 6;
+  const b = kept.rings[0];
+  b.orbs = [{ gapIndex: 0, offset: 0, type: 'energy', taken: false }];
+  b.collected = 1;
+  b.centreDist = 0.5;
+  b.centreHalf = 1;
+  kept._clearRing(b);
+  assert.equal(kept.combo, 6, 'collecting keeps the chain');
+
+  const bare = new World(55);
+  bare.combo = 6;
+  const c = bare.rings[0];
+  c.orbs = [];
+  c.collected = 0;
+  c.centreDist = 0.5;
+  c.centreHalf = 1;
+  bare._clearRing(c);
+  assert.equal(bare.combo, 6, 'a ring with no orb cannot break the chain');
 });
 
 test('the multiplier climbs with the chain and is capped', () => {
@@ -233,5 +254,60 @@ test('jumping to a score rebuilds the field in the matching zone', () => {
     assert.ok(w.rings.length > 0, 'the field is rebuilt');
     assert.ok(w.rings.every((r) => r.zone === zone), 'every ring belongs to the new zone');
     assert.ok(w.rings.every((r) => r.travel > TUNE.playerOrbit), 'nothing spawns on top of the player');
+  }
+});
+
+
+test('the player never survives touching a wall', () => {
+  // The regression test for the bug this game was reported with: the body that
+  // is drawn is the body that collides, so if any part of it overlaps a solid
+  // arc the run has to be over. Anything else looks like passing through walls.
+  const tolerance = 0.03; // the simulation's own edge forgiveness, plus a hair
+  for (const seed of [1, 2, 3, 4, 5, 6]) {
+    const w = new World(seed);
+    const bot = createAutopilot({ greedy: true });
+    for (let i = 0; i < 120 * 90 && w.alive; i++) {
+      stepAutopilot(w, bot);
+      w.update(DT);
+      w.events.length = 0;
+      if (!w.alive) break;
+      for (const ring of w.rings) {
+        if (ring.state !== 'live' && ring.state !== 'crossing') continue;
+        if (Math.abs(ring.radius - TUNE.playerOrbit) > BAND_HALF) continue;
+        let depth = Infinity;
+        const rel = wrap(w.player.angle - ring.rot);
+        for (let g = 0; g < ring.gaps.length; g++) {
+          const dist = angleDist(rel, World.gapCenterAt(ring, g, ring.travel));
+          depth = Math.min(depth, dist + PLAYER_HALF - ring.gaps[g].half);
+        }
+        assert.ok(depth <= tolerance,
+          `seed ${seed}: still alive ${depth.toFixed(3)} rad inside a wall`);
+      }
+    }
+  }
+});
+
+test('no ring is narrower than the player can sweep through', () => {
+  // A gap has to hold the player's width plus everything that moves past them
+  // while the ring is in contact, or it would be impossible however well timed.
+  for (const seed of [11, 22, 33]) {
+    const w = new World(seed);
+    const bot = createAutopilot({ greedy: false });
+    const seen = new Set();
+    for (let i = 0; i < 120 * 120 && w.alive; i++) {
+      stepAutopilot(w, bot);
+      w.update(DT);
+      w.events.length = 0;
+      for (const ring of w.rings) {
+        if (seen.has(ring.id)) continue;
+        seen.add(ring.id);
+        const floor = w._minGapHalf(ring);
+        for (const gap of ring.gaps) {
+          assert.ok(gap.half >= floor - 1e-9,
+            `seed ${seed} ring ${ring.id}: gap ${gap.half.toFixed(3)} < required ${floor.toFixed(3)}`);
+        }
+      }
+    }
+    assert.ok(seen.size > 40, `only inspected ${seen.size} rings`);
   }
 });

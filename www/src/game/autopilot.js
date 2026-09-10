@@ -21,15 +21,16 @@ export function createAutopilot({ greedy = true, sloppiness = 0 } = {}) {
 
 /** Returns true when the autopilot wants to reverse this step. */
 export function autopilotShouldFlip(world, state) {
-  const ring = world.nextRing();
+  const ring = pickRing(world);
   if (!ring) return false;
-  // A negative gap means the world was reset under a reused state object.
   const sinceFlip = world.time - state.lastFlip;
   if (sinceFlip >= 0 && sinceFlip < FLIP_COOLDOWN) return false;
 
-  const speed = TUNE.ringSpeed * world.speedScale;
-  const tc = (ring.travel - World.crossTravel(ring)) / speed;
-  if (tc <= 0) return false;
+  // Slow-motion scales the player and the rings together, so it cancels out of
+  // the reach calculation entirely.
+  const distance = ring.travel - World.crossTravel(ring);
+  if (distance <= 0) return false;
+  const reach = (world.playerSpeed / (TUNE.ringSpeed * world.speedScale)) * distance;
 
   let target = ring.targetAngle;
   if (state.greedy) {
@@ -40,7 +41,6 @@ export function autopilotShouldFlip(world, state) {
     target = wrap(target + (Math.random() - 0.5) * state.sloppiness);
   }
 
-  const reach = world.playerSpeed * tc;
   const stay = angleDist(wrap(world.player.angle + world.player.dir * reach), target);
   const flip = angleDist(wrap(world.player.angle - world.player.dir * reach), target);
   if (flip < stay - 0.02) {
@@ -48,6 +48,17 @@ export function autopilotShouldFlip(world, state) {
     return true;
   }
   return false;
+}
+
+/** The nearest ring the player can still steer for: one not yet crossing. */
+function pickRing(world) {
+  let best = null;
+  for (const r of world.rings) {
+    if (r.state !== 'live') continue;
+    if (r.travel <= World.crossTravel(r)) continue;
+    if (!best || r.travel < best.travel) best = r;
+  }
+  return best;
 }
 
 export function stepAutopilot(world, state) {

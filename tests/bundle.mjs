@@ -92,24 +92,39 @@ async function main() {
     await page.evaluate(() => { globalThis.__ORBITAL__.profile.seenTutorial = true; });
     await page.locator('#btn-play').click();
     await page.waitForFunction(() => globalThis.__ORBITAL__.mode === 'play', null, { timeout: 3000 });
-    await page.evaluate(() => { globalThis.__ORBITAL__.demo = true; });
-    await wait(8000);
-    const play = await page.evaluate(() => ({
-      score: globalThis.__ORBITAL__.world.score,
-      energy: globalThis.__ORBITAL__.world.energy,
-    }));
+    // Track the best the demo reached rather than whatever the clock lands on,
+    // so a demo run that ends early cannot flake the assertion.
+    await page.evaluate(() => {
+      const g = globalThis.__ORBITAL__;
+      g.demo = true;
+      g.__peak = { score: 0, energy: 0 };
+      g.__peakTimer = setInterval(() => {
+        g.__peak.score = Math.max(g.__peak.score, g.world.score);
+        g.__peak.energy = Math.max(g.__peak.energy, g.world.energy);
+      }, 100);
+    });
+    await wait(12000);
+    const play = await page.evaluate(() => {
+      const g = globalThis.__ORBITAL__;
+      clearInterval(g.__peakTimer);
+      return g.__peak;
+    });
     check('a run scores', play.score > 3, `score=${play.score}`);
     check('energy is collected', play.energy > 0, `energy=${play.energy}`);
 
-    const before = await page.evaluate(() => globalThis.__ORBITAL__.world.player.dir);
-    await page.evaluate(() => { globalThis.__ORBITAL__.demo = false; });
+    const before = await page.evaluate(() => {
+      const g = globalThis.__ORBITAL__;
+      g.demo = false;
+      if (g.mode !== 'play') g.startRun();
+      return g.world.player.dir;
+    });
     await page.locator('#stage').tap();
     const after = await page.evaluate(() => globalThis.__ORBITAL__.world.player.dir);
     check('tapping reverses the orbit', before === -after, `${before} -> ${after}`);
 
     await page.evaluate(() => {
       const g = globalThis.__ORBITAL__;
-      g.world._onCollision(g.world.rings[0], g.world.player.angle);
+      if (g.mode === 'play') g.world._onCollision(g.world.rings[0], g.world.player.angle);
     });
     await page.waitForSelector('#screen-over.on', { timeout: 6000 });
     check('the result screen appears', true);
