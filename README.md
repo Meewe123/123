@@ -26,7 +26,7 @@ That is the entire control scheme.
 | **The game** | `www/` — a zero-dependency ES-module web app. No engine, no framework, no bundler. |
 | **The native app** | `ios/` — a real Xcode project (Capacitor 8, Swift Package Manager, no CocoaPods). |
 | **The art** | `tools/make_icons.py` — every icon and the launch image are generated from code. |
-| **The tests** | `tests/` — 65 head-less simulation/meta tests, a 54-check browser end-to-end run, and an 11-check run of the single-file build. |
+| **The tests** | `tests/` — 67 head-less simulation/meta tests, a 52-check browser end-to-end run, and an 11-check run of the single-file build. |
 | **The listing** | `store/` — description, keywords, privacy policy, App Privacy answers, review notes, and generated screenshots. |
 
 No ads, no analytics, no in-app purchases, no accounts, no network calls. The
@@ -67,6 +67,11 @@ The game is the choice inside that:
   zero. At x8 the run enters **OVERDRIVE** — the halo, the trail, the music and
   the PERFECTs all step up. It is a state, not a power-up: nothing gets easier.
 
+The shield owns one colour, a saturated blue, and nothing else in the game is
+allowed near it — every skin is kept at least 40° of hue away, and orbs are
+pushed clear of it too. It is the only thing on screen that means "you can
+survive a mistake", so it never has to be identified twice.
+
 An orb never sits further off-centre than the gap can spare — reaching for one
 always costs part of your margin, and never all of it. That is asserted by a
 test, not by hand.
@@ -97,9 +102,6 @@ one without touching the simulation.
 
 ### Coming back
 
-* **Your ghost.** Your best endless run is recorded as an angle and a score on a
-  fixed time grid and replayed as a hollow outline on the next attempt. The HUD
-  shows whether you are ahead of it. It never touches collision.
 * **The daily run.** One seed derived from the date, so everyone gets the same
   rings. One attempt counts; replays sharpen your own record.
 * **Three missions a day**, rolled deterministically from the date — take twelve
@@ -155,7 +157,7 @@ mode) has to survive a long run on every seed for the suite to pass.
 | 0 | 0.95 s | Wide single gaps, slow rotation |
 | 25 | 0.76 s | Two-gap rings appear |
 | 80 | 0.57 s | Reversing and twin rings |
-| 200 | 0.43 s | Three-gap storms, drift, ghost rings |
+| 200 | 0.43 s | Storm rotation, drifting gaps, late-revealing rings |
 | 350+ | 0.38 s | Everything at once |
 
 Eight zones cycle every 14 rings, each with its own palette, hazard and musical
@@ -192,7 +194,6 @@ www/
       render.js            canvas renderer
       meta.js              missions, streak, economy (pure functions)
       effects.js           one PERFECT recipe per zone, plus cosmetic overrides
-      ghost.js             records and replays the personal best
       daily.js             the date-derived daily seed
       achievements.js      predicates over the profile, evaluated after a run
       palette.js           nudges zone hues clear of the equipped skin
@@ -218,8 +219,8 @@ store/                     everything App Store Connect asks for
 ## Testing
 
 ```bash
-npm test            # 65 head-less tests: simulation, fairness, economy, assets
-npm run test:e2e    # 54 checks in real Chromium at phone/tablet/landscape sizes
+npm test            # 67 head-less tests: simulation, fairness, economy, assets
+npm run test:e2e    # 52 checks in real Chromium at phone/tablet/landscape sizes
 npm run test:bundle # 11 checks driving the single-file build off the filesystem
 npm run verify      # icons + all three suites
 ```

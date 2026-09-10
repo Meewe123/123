@@ -28,8 +28,6 @@ export class UI {
       chainBar: $('chain-bar'),
       chainFill: $('chain-bar').firstElementChild,
       runShards: $('run-shards'),
-      ghostPill: $('ghost-pill'),
-      ghostDelta: $('ghost-delta'),
       powerbar: $('powerbar'),
       coach: $('coach'),
       zoneBanner: $('zone-banner'),
@@ -200,19 +198,6 @@ export class UI {
     }
   }
 
-  /** How the player is doing against their personal best ghost. */
-  setGhost(state) {
-    const pill = this.el.ghostPill;
-    if (!state) {
-      pill.hidden = true;
-      return;
-    }
-    pill.hidden = false;
-    const delta = state.delta;
-    pill.classList.toggle('ahead', delta > 0);
-    this.el.ghostDelta.textContent = delta > 0 ? `+${commas(delta)}` : commas(delta);
-  }
-
   showZone(zoneIndex, lap) {
     const zone = zoneByIndex(zoneIndex);
     this.el.zoneNum.textContent = `ZONE ${zoneIndex + 1 + lap * ZONES.length}`;
@@ -238,7 +223,6 @@ export class UI {
     this.setRunShards(0);
     this.setMultiplier(1, 0);
     this.setPowers({ shield: 0, slow: 0, double: 0 });
-    this.setGhost(null);
     this.el.coach.classList.remove('on');
     this.el.zoneBanner.classList.remove('show');
   }
@@ -248,13 +232,16 @@ export class UI {
   refreshTitle() {
     const p = this.profile;
     if (!p) return;
+    // Ask first: this rolls the daily over if the date has changed, so the
+    // numbers below are today's and not yesterday's.
+    const dailyOpen = this.h.dailyAvailable?.();
     $('title-best').textContent = commas(p.bestScore);
     $('title-daily').textContent = p.dailyBest?.score ? commas(p.dailyBest.score) : '—';
     $('title-streak').textContent = String(p.streak || 0);
     $('badge-shop').hidden = !this.h.hasShopNews?.();
     const claimable = this.h.claimableCount?.() || 0;
     const dailyBadge = $('badge-daily');
-    dailyBadge.hidden = !this.h.dailyAvailable?.() && claimable === 0;
+    dailyBadge.hidden = !dailyOpen && claimable === 0;
     dailyBadge.textContent = claimable ? String(claimable) : '!';
   }
 
@@ -563,15 +550,17 @@ function swatchOf(kindId, item) {
   return effectColor(item.id);
 }
 
+// Swatch colours for the shop and collection. Distinct from one another and
+// clear of the shield's blue, like every other colour in the game.
 const trailColor = (id) => ({
-  comet: '#5ff0e0', ribbon: '#8fd0ff', sparks: '#ffd23f',
-  prism: '#ff6fd8', pulse: '#b6ff3c', voidline: '#8a8aff',
-}[id] || '#5ff0e0');
+  comet: '#2fe0a8', ribbon: '#ffffff', sparks: '#ffd633',
+  prism: '#ff6bd0', pulse: '#b6ff3c', voidline: '#6b6f8f',
+}[id] || '#2fe0a8');
 
 const effectColor = (id) => ({
-  zone: '#5ff0e0', ring: '#8fd0ff', starburst: '#ffd23f',
-  shockwave: '#ff8a4c', bloom: '#ff6fd8', novaburst: '#ffffff',
-}[id] || '#5ff0e0');
+  zone: '#2fe0a8', ring: '#ffffff', starburst: '#ffd633',
+  shockwave: '#ff6b35', bloom: '#d94dff', novaburst: '#f0fdff',
+}[id] || '#2fe0a8');
 
 function previewClass(kindId, item) {
   if (kindId === 'skin') return item.shape;

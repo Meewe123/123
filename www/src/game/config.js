@@ -57,14 +57,8 @@ export const TUNE = {
   powerupEvery: 11,
 
   // --- feel ----------------------------------------------------------------
-  // A PERFECT freezes the world for a couple of frames. Long enough to feel
-  // like an impact, short enough that it never reads as a stutter.
-  hitStopSeconds: 0.055,
   // Death: how long the explosion plays before the summary appears.
   deathHold: 0.75,
-  // Ghost replay resolution. 20 Hz for 3 minutes is ~14 KB of save data.
-  ghostHz: 20,
-  ghostMaxSamples: 3600,
 };
 
 /** The multiplier at which the run enters OVERDRIVE. */
@@ -216,8 +210,21 @@ for (const z of ZONES) {
 
 export const zoneByIndex = (i) => ZONES[((i % ZONES.length) + ZONES.length) % ZONES.length];
 
+/**
+ * The shield owns one colour and nothing else in the game is allowed near it.
+ * It is the only thing on screen that means "you can survive a mistake", so it
+ * has to be identifiable instantly and never confused with a skin, a ring or
+ * an orb. Every skin below is deliberately kept out of this hue band.
+ */
+export const SHIELD = {
+  core: '#2f9bff',
+  deep: '#0a5cc8',
+  bright: '#bfe0ff',
+  rim: '#04122b',
+};
+
 export const POWERUPS = {
-  shield: { id: 'shield', label: 'SHIELD', color: '#7ef0ff' },
+  shield: { id: 'shield', label: 'SHIELD', color: SHIELD.core },
   slow: { id: 'slow', label: 'SLOW-MO', color: '#c08cff' },
   double: { id: 'double', label: 'x2 SCORE', color: '#ffd23f' },
 };
@@ -232,18 +239,20 @@ export const POWERUPS = {
  *   premium     — a real purchase, routed through PurchaseService
  */
 export const SKINS = [
-  { id: 'flow', name: 'Flow', unlock: 'free', cost: 0, core: '#ffffff', glow: '#5ff0e0', trail: '#5ff0e0', shape: 'orb', effect: 'zone' },
-  { id: 'volt', name: 'Volt', unlock: 'shards', cost: 300, core: '#fffbe6', glow: '#ffe14d', trail: '#ffb03a', shape: 'diamond', effect: 'zone' },
-  { id: 'inferno', name: 'Inferno', unlock: 'shards', cost: 550, core: '#fff1c9', glow: '#ff7a3c', trail: '#ff4d2e', shape: 'orb', effect: 'zone' },
-  { id: 'frost', name: 'Frost', unlock: 'shards', cost: 850, core: '#ffffff', glow: '#bfe9ff', trail: '#6fb7ff', shape: 'diamond', effect: 'zone' },
-  { id: 'drift', name: 'Drift', unlock: 'shards', cost: 1200, core: '#f0eaff', glow: '#a78bff', trail: '#6f4fd8', shape: 'orb', effect: 'zone' },
-  { id: 'ghost', name: 'Ghost', unlock: 'shards', cost: 1700, core: '#ffe9fb', glow: '#f07ae0', trail: '#a13ea6', shape: 'orb', effect: 'zone' },
-  { id: 'storm', name: 'Storm', unlock: 'shards', cost: 2400, core: '#ffffff', glow: '#8fd0ff', trail: '#3f7fd0', shape: 'square', effect: 'zone' },
-  { id: 'void', name: 'Void', unlock: 'achievement', achievement: 'zone_8', cost: 0, core: '#0a0a12', glow: '#8a8aff', trail: '#4a4ad0', shape: 'orb', effect: 'zone' },
-  { id: 'nova', name: 'Nova', unlock: 'achievement', achievement: 'mult_8', cost: 0, core: '#ffffff', glow: '#ffffff', trail: '#ffd23f', shape: 'star', effect: 'zone' },
-  { id: 'eclipse', name: 'Eclipse', unlock: 'achievement', achievement: 'perfect_100', cost: 0, core: '#120a18', glow: '#ff8a4c', trail: '#ffd166', shape: 'orb', effect: 'zone' },
-  { id: 'nebula', name: 'Nebula', unlock: 'premium', sku: 'cosmetic.nebula', cost: 0, core: '#ffffff', glow: '#ff2e88', trail: '#7b2fff', shape: 'diamond', effect: 'bloom' },
-  { id: 'supernova', name: 'Supernova', unlock: 'premium', sku: 'cosmetic.supernova', cost: 0, core: '#fffbe6', glow: '#ffd23f', trail: '#ff5a2e', shape: 'star', effect: 'starburst' },
+  // `rim` is the dark outline the body is drawn with, tuned per skin so it
+  // separates from a bright ring without looking like a sticker.
+  { id: 'flow', name: 'Flow', unlock: 'free', cost: 0, core: '#ffffff', glow: '#2fe0a8', trail: '#0fa87c', rim: '#02201a', shape: 'orb', effect: 'zone' },
+  { id: 'volt', name: 'Volt', unlock: 'shards', cost: 300, core: '#fffbe6', glow: '#ffd633', trail: '#ff9f1c', rim: '#241a00', shape: 'diamond', effect: 'zone' },
+  { id: 'inferno', name: 'Inferno', unlock: 'shards', cost: 550, core: '#fff1c9', glow: '#ff6b35', trail: '#d92b1f', rim: '#250700', shape: 'orb', effect: 'zone' },
+  { id: 'frost', name: 'Frost', unlock: 'shards', cost: 850, core: '#ffffff', glow: '#f0fdff', trail: '#b8e6f2', rim: '#0b2630', shape: 'diamond', effect: 'zone' },
+  { id: 'drift', name: 'Drift', unlock: 'shards', cost: 1200, core: '#f0eaff', glow: '#9b6bff', trail: '#5f2fd0', rim: '#140429', shape: 'orb', effect: 'zone' },
+  { id: 'ghost', name: 'Ghost', unlock: 'shards', cost: 1700, core: '#ffe9fb', glow: '#f56ad0', trail: '#9c2fa8', rim: '#26041f', shape: 'orb', effect: 'zone' },
+  { id: 'storm', name: 'Storm', unlock: 'shards', cost: 2400, core: '#f4ffe0', glow: '#b6ff3c', trail: '#62b800', rim: '#101f00', shape: 'square', effect: 'zone' },
+  { id: 'void', name: 'Void', unlock: 'achievement', achievement: 'zone_8', cost: 0, core: '#0a0a12', glow: '#cdd2e8', trail: '#6b6f8f', rim: '#000000', shape: 'orb', effect: 'zone' },
+  { id: 'nova', name: 'Nova', unlock: 'achievement', achievement: 'mult_8', cost: 0, core: '#ffffff', glow: '#ffffff', trail: '#b9c6ff', rim: '#101018', shape: 'star', effect: 'zone' },
+  { id: 'eclipse', name: 'Eclipse', unlock: 'achievement', achievement: 'perfect_100', cost: 0, core: '#1a0710', glow: '#ff3d6e', trail: '#a3123f', rim: '#12000a', shape: 'orb', effect: 'zone' },
+  { id: 'nebula', name: 'Nebula', unlock: 'premium', sku: 'cosmetic.nebula', cost: 0, core: '#ffffff', glow: '#d94dff', trail: '#9b2fff', rim: '#210430', shape: 'diamond', effect: 'bloom' },
+  { id: 'supernova', name: 'Supernova', unlock: 'premium', sku: 'cosmetic.supernova', cost: 0, core: '#ffffff', glow: '#ffe9c9', trail: '#ff5a2e', rim: '#280a00', shape: 'star', effect: 'starburst' },
 ];
 
 /** Trail styles. `style` picks the renderer's stroke behaviour. */

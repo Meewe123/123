@@ -8,6 +8,8 @@
  * that separates them, so each zone keeps its identity.
  */
 
+import { SHIELD } from './config.js';
+
 const HUE_KEYS = ['ring', 'ringDim', 'orb'];
 
 /**
@@ -81,49 +83,54 @@ export function hueDistance(a, b) {
 }
 
 /**
- * Rotate `hex` just far enough that its hue sits `minDegrees` away from
- * `awayFrom`, pushing in whichever direction it is already leaning. Saturation
- * and lightness are untouched, so the colour keeps its character.
+ * Rotate `hex` to the nearest hue that clears every constraint at once.
+ *
+ * Satisfying constraints one at a time does not work: pushing a colour clear of
+ * the skin and then clear of the shield can land it right back on the skin. So
+ * search outward from the original hue and take the first rotation that clears
+ * all of them together.
  */
-export function pushHueAway(hex, awayFrom, minDegrees) {
+export function pushHueClear(hex, constraints) {
   const [h, s, l] = rgbToHsl(hexToRgb(hex));
-  const delta = hueDelta(awayFrom, h);
-  const distance = Math.abs(delta);
-  if (distance >= minDegrees) return hex;
-  // A near-grey has no hue worth rotating.
-  if (s < 0.12) return hex;
-  const direction = delta === 0 ? 1 : Math.sign(delta);
-  return rgbToHex(hslToRgb(awayFrom + direction * minDegrees, s, l));
-}
+  // A near-grey has no hue worth rotating, and cannot collide with anything.
+  if (s < 0.12 || l > 0.92 || l < 0.08) return hex;
 
-/**
- * The shield reads as the player's opposite: a hue roughly across the wheel
- * from the skin, held bright so it stays legible over any zone.
- */
-export function shieldColorFor(skin, ringHex) {
-  const [skinHue] = rgbToHsl(hexToRgb(skin.glow));
-  let hue = skinHue + 165;
-  const [ringHue, ringSat] = rgbToHsl(hexToRgb(ringHex));
-  // If that lands on the ring colour too, step around it.
-  if (ringSat > 0.12 && hueDistance(hue, ringHue) < 40) {
-    hue = ringHue + (hueDelta(ringHue, hue) >= 0 ? 40 : -40);
+  const clears = (hue) => constraints.every((c) => hueDistance(hue, c.hue) >= c.min);
+  if (clears(h)) return hex;
+
+  for (let step = 4; step <= 180; step += 4) {
+    for (const dir of [1, -1]) {
+      const candidate = h + dir * step;
+      if (clears(candidate)) return rgbToHex(hslToRgb(candidate, s, l));
+    }
   }
-  return rgbToHex(hslToRgb(hue, 0.86, 0.66));
+  // Over-constrained: leave the colour alone rather than pick something wild.
+  return hex;
 }
 
 /**
- * Adjust one zone palette so nothing in it collides with the equipped skin.
- * Returns a palette of the same shape plus a `shield` colour.
+ * Adjust one zone palette so nothing in it collides with the equipped skin,
+ * with the ring it sits on, or with the shield's reserved blue.
  */
 export function adjustPalette(zonePalette, skin) {
   const [skinHue] = rgbToHsl(hexToRgb(skin.glow));
+  const [shieldHue] = rgbToHsl(hexToRgb(SHIELD.core));
   const out = { ...zonePalette };
-  for (const key of HUE_KEYS) {
-    out[key] = pushHueAway(zonePalette[key], skinHue, SEPARATION[key]);
+
+  for (const key of ['ring', 'ringDim']) {
+    out[key] = pushHueClear(zonePalette[key], [{ hue: skinHue, min: SEPARATION[key] }]);
   }
-  // The orb must also stay distinct from the ring it sits on.
+
+  // An orb must stay distinct from the player, from the ring it sits on, and
+  // from the shield — mistaking a shield pickup for an energy orb costs the
+  // player a decision. All three at once, or the last push undoes the first.
   const [ringHue, ringSat] = rgbToHsl(hexToRgb(out.ring));
-  if (ringSat > 0.12) out.orb = pushHueAway(out.orb, ringHue, 34);
-  out.shield = shieldColorFor(skin, out.ring);
+  const orbConstraints = [
+    { hue: skinHue, min: SEPARATION.orb },
+    { hue: shieldHue, min: 40 },
+  ];
+  if (ringSat > 0.12) orbConstraints.push({ hue: ringHue, min: 34 });
+  out.orb = pushHueClear(zonePalette.orb, orbConstraints);
+
   return out;
 }

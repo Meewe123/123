@@ -58,9 +58,6 @@ export const DEFAULT_PROFILE = Object.freeze({
   dailyBest: { score: 0, zone: 0, multiplier: 1, perfects: 0, orbs: 0 },
   dailyPlayed: false,
 
-  // --- personal best ghost --------------------------------------------------
-  ghost: null,
-
   // --- local leaderboard ----------------------------------------------------
   recent: [],
 

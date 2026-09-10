@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { World, EVT, PLAYER_HALF } from '../www/src/game/world.js';
-import { TUNE, OVERDRIVE_AT } from '../www/src/game/config.js';
+import { TUNE, OVERDRIVE_AT, ZONES, SKINS, SHIELD } from '../www/src/game/config.js';
+import { adjustPalette, rgbToHsl, hexToRgb, hueDistance } from '../www/src/game/palette.js';
+import { resolvePerfectEffect, EFFECT_IDS } from '../www/src/game/effects.js';
 import { createAutopilot, stepAutopilot } from '../www/src/game/autopilot.js';
-import { GhostRecorder, GhostPlayer, bestGhost } from '../www/src/game/ghost.js';
 import * as daily from '../www/src/game/daily.js';
 import * as store from '../www/src/engine/storage.js';
 import { encodeChallenge, decodeChallenge } from '../www/src/services/challenge.js';
@@ -134,75 +135,6 @@ test('a broken chain reports what was lost', () => {
   assert.ok(broken.from > 1);
 });
 
-// -------------------------------------------------------------------- ghost ---
-
-test('a ghost replays the run it recorded', () => {
-  const w = new World(21);
-  const recorder = new GhostRecorder(20, 400);
-  const bot = createAutopilot({ greedy: false });
-  const samples = [];
-  for (let i = 0; i < 120 * 12 && w.alive; i++) {
-    stepAutopilot(w, bot);
-    w.update(DT);
-    w.events.length = 0;
-    recorder.sample(w);
-    samples.push({ t: w.time, angle: w.player.angle, score: w.score });
-  }
-
-  const data = recorder.toData({ score: w.score, seed: w.seed });
-  assert.ok(data, 'a run of that length is worth keeping');
-  const ghost = new GhostPlayer(data);
-  assert.equal(ghost.available, true);
-  assert.equal(ghost.score, w.score);
-  assert.ok(ghost.duration > 5);
-
-  // Replayed angles must track the real ones within the recording resolution.
-  let worst = 0;
-  for (const s of samples) {
-    const replayed = ghost.angleAt(s.t);
-    if (replayed === null) continue;
-    let d = Math.abs(((replayed - s.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-    worst = Math.max(worst, d);
-  }
-  assert.ok(worst < 0.25, `ghost drifted ${worst.toFixed(3)} rad from the real run`);
-  assert.equal(ghost.angleAt(ghost.duration + 5), null, 'the ghost ends when the run did');
-  assert.ok(ghost.scoreAt(ghost.duration) >= ghost.scoreAt(0));
-});
-
-test('a ghost is deterministic and the better one is kept', () => {
-  const replay = () => {
-    const w = new World(33);
-    const recorder = new GhostRecorder(20, 400);
-    const bot = createAutopilot({ greedy: false });
-    for (let i = 0; i < 120 * 8 && w.alive; i++) {
-      stepAutopilot(w, bot);
-      w.update(DT);
-      w.events.length = 0;
-      recorder.sample(w);
-    }
-    return recorder.toData({ score: w.score, seed: w.seed });
-  };
-  assert.deepEqual(replay(), replay(), 'same seed, same ghost');
-
-  const weak = { v: 1, hz: 20, score: 10, angles: [0, 1], scores: [0, 1] };
-  const strong = { v: 1, hz: 20, score: 90, angles: [0, 1], scores: [0, 1] };
-  assert.equal(bestGhost(weak, strong).score, 90);
-  assert.equal(bestGhost(strong, weak).score, 90);
-  assert.equal(bestGhost(strong, null).score, 90, 'a missing ghost never replaces a good one');
-  assert.equal(new GhostPlayer(null).available, false);
-  assert.equal(new GhostPlayer({ angles: [1], scores: [1], hz: 20 }).available, false);
-});
-
-test('a run too short to be useful produces no ghost', () => {
-  const recorder = new GhostRecorder(20, 400);
-  const w = new World(4);
-  for (let i = 0; i < 10; i++) {
-    w.update(DT);
-    recorder.sample(w);
-  }
-  assert.equal(recorder.toData({ score: 0 }), null);
-});
-
 // -------------------------------------------------------------------- daily ---
 
 test('the daily seed is fixed by the date and differs day to day', () => {
@@ -307,18 +239,105 @@ test('the upgraded save keeps the new state and survives a round trip', () => {
   const p = store.migrate(null);
   assert.equal(p.version, store.SAVE_VERSION);
   assert.equal(p.shards, 0);
-  assert.equal(p.ghost, null);
   assert.deepEqual(p.achievements, []);
   assert.equal(p.dailyBest.score, 0);
 
   p.shards = 900;
-  p.ghost = { v: 1, hz: 20, score: 40, angles: [1, 2, 3], scores: [0, 1, 2] };
   p.achievements = ['first_perfect'];
   p.recent = new Array(50).fill({ score: 1 });
 
   const round = store.migrate(JSON.parse(JSON.stringify(p)));
   assert.equal(round.shards, 900);
-  assert.equal(round.ghost.score, 40);
   assert.deepEqual(round.achievements, ['first_perfect']);
   assert.equal(round.recent.length, 20, 'the local history stays bounded');
+});
+
+// -------------------------------------------------------- regression tests ---
+
+test('an orb never lands on the player, the ring, or the shield blue', () => {
+  // Satisfying these one at a time silently undoes the earlier push; this is
+  // the whole point of solving them together.
+  const chroma = (hex) => {
+    const [h, s, l] = rgbToHsl(hexToRgb(hex));
+    return { h, c: s * (1 - Math.abs(2 * l - 1)) };
+  };
+  const shieldHue = chroma(SHIELD.core).h;
+  let worst = Infinity;
+  let where = '';
+  for (const zone of ZONES) {
+    for (const skin of SKINS) {
+      const pal = adjustPalette(zone.palette, skin);
+      const orb = chroma(pal.orb);
+      if (orb.c < 0.2) continue; // a near-grey orb cannot clash with a hue
+      const others = [
+        ['skin', chroma(skin.glow)],
+        ['ring', chroma(pal.ring)],
+        ['shield', { h: shieldHue, c: 1 }],
+      ];
+      for (const [name, other] of others) {
+        if (other.c < 0.2) continue;
+        const d = hueDistance(orb.h, other.h);
+        if (d < worst) {
+          worst = d;
+          where = `${zone.id}/${skin.id}: orb vs ${name}`;
+        }
+      }
+    }
+  }
+  assert.ok(worst >= 30, `${where} are only ${worst.toFixed(0)}° apart`);
+});
+
+test('no skin competes with the colour reserved for the shield', () => {
+  const chroma = (hex) => {
+    const [h, s, l] = rgbToHsl(hexToRgb(hex));
+    return { h, c: s * (1 - Math.abs(2 * l - 1)) };
+  };
+  const shieldHue = chroma(SHIELD.core).h;
+  for (const skin of SKINS) {
+    const g = chroma(skin.glow);
+    if (g.c < 0.25) continue; // desaturated skins read as white, not as blue
+    assert.ok(hueDistance(g.h, shieldHue) >= 40,
+      `${skin.id} sits ${hueDistance(g.h, shieldHue).toFixed(0)}° from the shield`);
+  }
+});
+
+test('a revived run files one score, not one per death', async () => {
+  const p = store.migrate(null);
+  const board = new LeaderboardService(new LocalStore(p));
+  await board.submit({ id: 'run-1', score: 120, zone: 2 });
+  await board.submit({ id: 'run-1', score: 260, zone: 4 });
+  await board.submit({ id: 'run-2', score: 90, zone: 1 });
+
+  const top = await board.top();
+  assert.equal(top.length, 2, 'the revived run is one entry');
+  assert.equal(top[0].score, 260, 'and it is the final score that stands');
+});
+
+test('the daily board resolves its date when it is used', async () => {
+  const p = store.migrate(null);
+  let today = '2026-09-10';
+  const board = new DailyLeaderboardService(new LocalStore(p), () => today);
+  await board.submit({ score: 100 });
+  assert.equal((await board.top()).length, 1);
+
+  today = '2026-09-11'; // a session that outlived midnight
+  assert.equal(board.dateKey, '2026-09-11');
+  assert.equal((await board.top()).length, 0, "yesterday's runs are not today's");
+  await board.submit({ score: 50 });
+  assert.equal((await board.top())[0].score, 50);
+});
+
+test('a PERFECT effect falls back through cosmetic, skin, then zone', () => {
+  const zone = ZONES.find((z) => z.fx.perfect === 'shatter');
+  const plainSkin = SKINS.find((s) => s.effect === 'zone');
+  const signatureSkin = SKINS.find((s) => s.effect && s.effect !== 'zone');
+
+  assert.equal(resolvePerfectEffect('zone', plainSkin, zone), zone.fx.perfect,
+    'nothing equipped and a plain skin: the zone decides');
+  assert.equal(resolvePerfectEffect('zone', signatureSkin, zone), signatureSkin.effect,
+    'a skin with its own signature uses it');
+  assert.equal(resolvePerfectEffect('shockwave', signatureSkin, zone), 'shockwave',
+    'an equipped effect beats everything');
+  assert.ok(EFFECT_IDS.includes(resolvePerfectEffect('zone', signatureSkin, zone)),
+    'and whatever it resolves to has a recipe');
 });

@@ -244,8 +244,6 @@ async function main() {
     await page.waitForFunction(() => globalThis.__ORBITAL__.mode === 'play', null, { timeout: 3000 });
     check('TRY AGAIN is back in play in under a second', Date.now() - retryStart < 1000,
       `${Date.now() - retryStart}ms`);
-    check('the ghost of the previous run is available',
-      await page.evaluate(() => globalThis.__ORBITAL__.ghost.available));
     await page.evaluate(() => {
       const g = globalThis.__ORBITAL__;
       g.world._onCollision(g.world.rings[0], g.world.player.angle);
@@ -334,7 +332,6 @@ async function main() {
       best: globalThis.__ORBITAL__.profile.bestScore,
       runs: globalThis.__ORBITAL__.profile.runs,
       shards: globalThis.__ORBITAL__.profile.shards,
-      ghost: !!globalThis.__ORBITAL__.profile.ghost,
       coached: (globalThis.__ORBITAL__.profile.tutorialSeen || []).length,
       titleBest: document.getElementById('title-best').textContent,
     }));
@@ -342,7 +339,6 @@ async function main() {
     check('title screen shows the stored best',
       Number(reloaded.titleBest.replace(/,/g, '')) === reloaded.best);
     check('shards survive a reload', reloaded.shards > 0, `shards=${reloaded.shards}`);
-    check('the personal-best ghost was saved', reloaded.ghost);
     check('coaching lines are not repeated', reloaded.coached > 0, `seen=${reloaded.coached}`);
 
     console.log('\nresponsive layout');

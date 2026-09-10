@@ -134,8 +134,11 @@ export async function shareRun(result, palette, skin, text, link) {
         return 'image';
       }
     }
-  } catch {
-    /* fall through to text */
+  } catch (err) {
+    // Dismissing the sheet is a decision, not a failure: never answer it by
+    // opening a second one.
+    if (err && err.name === 'AbortError') return 'cancelled';
+    /* anything else: fall through to a plain text share */
   }
 
   try {

@@ -30,6 +30,12 @@ export class LocalStore {
 
   async submit(entry) {
     const recent = this.profile.recent || (this.profile.recent = []);
+    // An entry carrying an id replaces its earlier version, so a run that was
+    // revived files one score rather than one per death.
+    if (entry.id) {
+      const existing = recent.findIndex((e) => e.id === entry.id);
+      if (existing >= 0) recent.splice(existing, 1);
+    }
     recent.unshift(entry);
     recent.length = Math.min(recent.length, MAX_RECENT);
   }
@@ -76,9 +82,14 @@ export class LeaderboardService {
 }
 
 export class DailyLeaderboardService extends LeaderboardService {
+  /** `dateKey` may be a string or a function — a session can outlive midnight. */
   constructor(store, dateKey) {
     super(store);
-    this.dateKey = dateKey;
+    this._dateKey = dateKey;
+  }
+
+  get dateKey() {
+    return typeof this._dateKey === 'function' ? this._dateKey() : this._dateKey;
   }
 
   get label() {

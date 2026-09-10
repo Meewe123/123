@@ -9,8 +9,11 @@
 import { TAU, clamp, lerp, wrap } from '../engine/util.js';
 import { FONT } from '../engine/fx.js';
 import { World } from './world.js';
-import { TUNE, ZONES, OVERDRIVE_AT, zoneByIndex, skinById, trailById, POWERUPS } from './config.js';
+import {
+  TUNE, ZONES, SKINS, OVERDRIVE_AT, zoneByIndex, skinById, trailById, POWERUPS,
+} from './config.js';
 import { adjustPalette } from './palette.js';
+import { SHIELD } from './config.js';
 
 const STAR_COUNT = 130;
 const TRAIL_LEN = 26;
@@ -28,7 +31,7 @@ function mixInto(cur, target, t) {
   cur[2] = lerp(cur[2], target[2], t);
 }
 
-const PALETTE_KEYS = ['bg0', 'bg1', 'ring', 'ringDim', 'accent', 'orb', 'grid', 'shield'];
+const PALETTE_KEYS = ['bg0', 'bg1', 'ring', 'ringDim', 'accent', 'orb', 'grid'];
 
 export class Renderer {
   constructor(canvas) {
@@ -43,11 +46,18 @@ export class Renderer {
     this.reduced = false;
 
     this.pal = {};
-    this._targetHex = adjustPalette(ZONES[0].palette, skinById('aurora'));
+    this._targetRgb = {};
+    this._targetHex = adjustPalette(ZONES[0].palette, SKINS[0]);
     this._paletteKey = '';
-    for (const k of PALETTE_KEYS) this.pal[k] = hexToRgb(this._targetHex[k]);
+    for (const k of PALETTE_KEYS) {
+      this._targetRgb[k] = hexToRgb(this._targetHex[k]);
+      this.pal[k] = this._targetRgb[k].slice();
+    }
 
     this.stars = [];
+    this._moteBuckets = Array.from({ length: 6 }, () => []);
+    this._gapScratch = Array.from({ length: 8 }, () => ({ c: 0, half: 0 }));
+    this._haloCache = new Map();
     this.trail = [];
     this._skyGradient = null;
     this._skyKey = '';
@@ -88,6 +98,8 @@ export class Renderer {
     this._skyGradient = null;
     this._skyKey = '';
     this._vignette = null;
+    this._vignetteDark = -1;
+    this._haloCache.clear();
     this._buildStars();
   }
 
@@ -129,14 +141,16 @@ export class Renderer {
     if (key !== this._paletteKey) {
       this._paletteKey = key;
       this._targetHex = adjustPalette(ZONES[zoneIndex % ZONES.length].palette, skinById(skinId));
+      // Parse once per zone change, not seven times per frame.
+      for (const k of PALETTE_KEYS) this._targetRgb[k] = hexToRgb(this._targetHex[k]);
     }
     const t = 1 - Math.exp(-3.2 * dt);
-    for (const k of PALETTE_KEYS) mixInto(this.pal[k], hexToRgb(this._targetHex[k]), t);
+    for (const k of PALETTE_KEYS) mixInto(this.pal[k], this._targetRgb[k], t);
   }
 
-  /** The current shield colour, chosen to contrast with the equipped skin. */
+  /** The shield's colour is fixed by design — see SHIELD in config.js. */
   get shieldColor() {
-    return this._targetHex.shield;
+    return SHIELD.core;
   }
 
   /** The live palette as hex strings — for anything drawing outside the game. */
@@ -147,13 +161,12 @@ export class Renderer {
   // ---------------------------------------------------------------- draw ---
 
   draw(world, opts) {
-    const {
-      fx, dt, skinId, trailId = 'comet', intensity = 1, ghostAngle = null,
-    } = opts;
+    const { fx, dt, skinId, trailId = 'comet', intensity = 1 } = opts;
     const ctx = this.ctx;
     const zone = zoneByIndex(world.visualZone);
     this.zoneFx = zone.fx;
     this.clock += dt;
+    this.frameDt = dt;
 
     // Multiplier ramp. Damped, never instant, so it reads as the run heating
     // up rather than as a light switch.
@@ -177,7 +190,6 @@ export class Renderer {
     this._drawCore(ctx, world);
     this._drawOrbitGuide(ctx);
     this._drawRings(ctx, world);
-    if (ghostAngle !== null) this._drawGhost(ctx, ghostAngle);
     this._drawPlayer(ctx, world, skinById(skinId), trailById(trailId));
     fx.draw(ctx);
     ctx.restore();
@@ -207,7 +219,7 @@ export class Renderer {
     ctx.fillRect(0, 0, this.w, this.h);
 
     this._drawMotes(ctx, intensity);
-    this._drawSkyOverlay(ctx);
+    this._drawSkyOverlay(ctx, this.frameDt);
   }
 
   /**
@@ -219,15 +231,17 @@ export class Renderer {
     if (style === 'none') return;
     const t = this.clock;
 
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = rgba(this.pal.accent, 1);
+    // Bucket by brightness and emit one path per bucket: six fills instead of
+    // a hundred and thirty, which is what a software rasteriser actually feels.
+    const buckets = this._moteBuckets;
+    for (const bucket of buckets) bucket.length = 0;
 
     for (const s of this.stars) {
       let a = s.a + this.skyRot * s.depth;
       let radius = s.r;
       let size = s.size;
       let alpha = 0.10 + 0.30 * s.depth;
+      let tall = 1;
 
       switch (style) {
         case 'spark': {
@@ -252,6 +266,7 @@ export class Renderer {
           a += Math.sin(t * 0.7 + s.tw) * 0.09;
           alpha *= 0.5 + 0.5 * Math.sin(t * 1.1 + s.tw * 3);
           size *= 1.6;
+          tall = 2.4;
           break;
         case 'rain':
           // STORM: streaks driven inward, fast.
@@ -259,40 +274,58 @@ export class Renderer {
           if (radius < 0) radius += 360;
           size *= 0.8;
           alpha *= 1.3;
+          tall = 4;
           break;
         default:
           alpha *= 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(this.skyRot * 9 + s.tw));
           break;
       }
 
-      const x = this.cx + Math.cos(a) * radius;
-      const y = this.cy + Math.sin(a) * radius;
-      ctx.globalAlpha = Math.min(0.85, alpha * intensity);
-      if (style === 'rain' || style === 'wisp') {
-        ctx.fillRect(x, y, size, size * (style === 'rain' ? 4 : 2.4));
-      } else {
-        ctx.fillRect(x, y, size, size);
+      alpha = Math.min(0.85, alpha * intensity);
+      if (alpha <= 0.02) continue;
+      const bucket = buckets[Math.min(buckets.length - 1, (alpha * buckets.length) | 0)];
+      bucket.push(
+        this.cx + Math.cos(a) * radius,
+        this.cy + Math.sin(a) * radius,
+        size,
+        size * tall,
+      );
+    }
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = rgba(this.pal.accent, 1);
+    for (let b = 0; b < buckets.length; b++) {
+      const bucket = buckets[b];
+      if (!bucket.length) continue;
+      ctx.globalAlpha = ((b + 0.5) / buckets.length) * 0.85;
+      for (let i = 0; i < bucket.length; i += 4) {
+        ctx.fillRect(bucket[i], bucket[i + 1], bucket[i + 2], bucket[i + 3]);
       }
     }
     ctx.restore();
   }
 
   /** One extra pass per zone, at most. Never over the play area's mid-band. */
-  _drawSkyOverlay(ctx) {
+  _drawSkyOverlay(ctx, dt) {
     const style = this.zoneFx.sky;
+    // GHOST and VOID want the whole frame pulled down. That is the vignette's
+    // job — folding it in there costs nothing instead of a second full-screen
+    // fill every frame.
+    this.zoneDark = style === 'void' ? 0.22 : style === 'ghost' ? 0.12 : 0;
     if (this.reduced || style === 'calm') return;
     const t = this.clock;
 
     if (style === 'storm') {
       // Lightning: a brief wash across the whole frame, well under the
       // brightness of a ring so nothing is ever hidden behind it.
-      this.stormNext -= 1 / 60;
+      this.stormNext -= dt;
       if (this.stormNext <= 0) {
         this.stormFlash = 0.13;
         this.stormNext = 1.1 + (Math.sin(t * 7.3) * 0.5 + 0.5) * 2.2;
       }
       if (this.stormFlash > 0) {
-        this.stormFlash = Math.max(0, this.stormFlash - 1 / 60);
+        this.stormFlash = Math.max(0, this.stormFlash - dt);
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = this.stormFlash * 0.55;
@@ -343,16 +376,6 @@ export class Renderer {
         );
         ctx.stroke();
       }
-    } else if (style === 'ghost') {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 0.10 + 0.05 * Math.sin(t * 0.8);
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, this.w, this.h);
-    } else if (style === 'void') {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 0.22;
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, this.w, this.h);
     }
     ctx.restore();
   }
@@ -473,15 +496,23 @@ export class Renderer {
       const thick = Math.max(2, ring.thickness * u);
       const rot = ring.rot;
 
-      // Solid arcs are the complement of the gaps.
-      const gaps = [];
-      for (let g = 0; g < ring.gaps.length; g++) {
-        gaps.push({
-          c: wrap(World.gapCenterAt(ring, g, ring.travel)),
-          half: ring.gaps[g].half,
-        });
+      // Solid arcs are the complement of the gaps. Rings carry at most three
+      // gaps, so this fills a reused buffer and insertion-sorts it in place
+      // rather than allocating an array and a comparator every frame.
+      const gaps = this._gapScratch;
+      const gapCount = ring.gaps.length;
+      for (let g = 0; g < gapCount; g++) {
+        const c = wrap(World.gapCenterAt(ring, g, ring.travel));
+        const half = ring.gaps[g].half;
+        let i = g - 1;
+        while (i >= 0 && gaps[i].c > c) {
+          gaps[i + 1].c = gaps[i].c;
+          gaps[i + 1].half = gaps[i].half;
+          i--;
+        }
+        gaps[i + 1].c = c;
+        gaps[i + 1].half = half;
       }
-      gaps.sort((a, b) => a.c - b.c);
 
       const flash = ring.hitFlash;
       const bright = flash > 0
@@ -489,9 +520,9 @@ export class Renderer {
         : p.ring;
 
       ctx.lineCap = 'round';
-      for (let g = 0; g < gaps.length; g++) {
+      for (let g = 0; g < gapCount; g++) {
         const from = gaps[g].c + gaps[g].half;
-        const next = gaps[(g + 1) % gaps.length];
+        const next = gaps[(g + 1) % gapCount];
         let to = next.c - next.half;
         if (to < from) to += TAU;
         if (to - from < 0.02) continue;
@@ -541,15 +572,11 @@ export class Renderer {
 
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = alpha;
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.1);
-      g.addColorStop(0, color);
-      g.addColorStop(0.28, color);
-      g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.globalAlpha = alpha * 0.55;
-      ctx.fillStyle = g;
+      ctx.translate(x, y);
+      ctx.fillStyle = this._orbHalo(ctx, color, r * 3.1);
       ctx.beginPath();
-      ctx.arc(x, y, r * 3.1, 0, TAU);
+      ctx.arc(0, 0, r * 3.1, 0, TAU);
       ctx.fill();
       ctx.restore();
 
@@ -578,6 +605,25 @@ export class Renderer {
       }
       ctx.restore();
     }
+  }
+
+  /**
+   * Orb haloes are the same gradient over and over, so build each one once at
+   * the origin and move the canvas to it instead of rebuilding per orb, per
+   * frame.
+   */
+  _orbHalo(ctx, color, radius) {
+    const key = `${color}|${Math.round(radius)}`;
+    let halo = this._haloCache.get(key);
+    if (!halo) {
+      halo = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+      halo.addColorStop(0, color);
+      halo.addColorStop(0.28, color);
+      halo.addColorStop(1, 'rgba(0,0,0,0)');
+      if (this._haloCache.size > 24) this._haloCache.clear();
+      this._haloCache.set(key, halo);
+    }
+    return halo;
   }
 
   _drawPlayer(ctx, world, skin, trail) {
@@ -654,8 +700,10 @@ export class Renderer {
     ctx.scale(squash, flatten * (2 - squash));
 
     // A dark rim keeps the body from dissolving into a bright ring behind it.
+    // Each skin carries its own, tuned to sit under its glow rather than
+    // looking like a black sticker.
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(4,7,14,0.85)';
+    ctx.strokeStyle = skin.rim || '#04070e';
     ctx.lineWidth = Math.max(1.5, r * 0.30);
     this._shapePath(ctx, skin.shape, r);
     ctx.stroke();
@@ -666,34 +714,74 @@ export class Renderer {
     ctx.fillStyle = skin.core;
     this._shapePath(ctx, skin.shape, r * 0.58);
     ctx.fill();
+
+    // A specular pip: two pixels of white that turn a flat shape into an
+    // object catching the light of the star it is orbiting.
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(-r * 0.30, -r * 0.28, r * 0.17, 0, TAU);
+    ctx.fill();
     ctx.restore();
 
-    // Shield bubbles: one ring per remaining charge.
+    // The shield is the only thing on screen that means "you can survive a
+    // mistake", so it gets its own colour and its own construction: a dark
+    // rim, a tinted interior, a bright shell and a highlight that travels
+    // around it. One shell per remaining charge.
     const charges = world.shieldCharges || 0;
     const flashing = world.shieldTimer > 0 && charges === 0;
     if (charges > 0 || flashing) {
-      const shieldColor = this.shieldColor;
-      const pulse = flashing
-        ? 0.4 + 0.6 * Math.abs(Math.sin(world.time * 22))
-        : 0.7 + 0.3 * Math.sin(world.time * 5);
+      const breathe = flashing
+        ? 0.35 + 0.65 * Math.abs(Math.sin(world.time * 22))
+        : 0.82 + 0.18 * Math.sin(world.time * 3.4);
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(a + Math.PI / 2);
-      ctx.scale(1, Math.max(flatten, 0.62));
-      const rings = Math.max(1, charges);
-      for (let i = 0; i < rings; i++) {
-        ctx.globalAlpha = pulse * (i === 0 ? 1 : 0.55);
-        ctx.strokeStyle = shieldColor;
-        ctx.lineWidth = Math.max(1.5, r * 0.15);
+      ctx.scale(1, Math.max(flatten, 0.64));
+
+      for (let i = Math.max(1, charges) - 1; i >= 0; i--) {
+        const rr = r * (1.62 + i * 0.44);
+        const outer = i > 0;
+        const alpha = breathe * (outer ? 0.5 : 1);
+
+        // Rim first, so the shell never merges into a bright ring behind it.
+        ctx.globalAlpha = alpha * 0.75;
+        ctx.strokeStyle = SHIELD.rim;
+        ctx.lineWidth = Math.max(2.4, r * 0.26);
         ctx.beginPath();
-        ctx.arc(0, 0, r * (1.55 + i * 0.42), 0, TAU);
+        ctx.arc(0, 0, rr, 0, TAU);
         ctx.stroke();
+
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = flashing ? '#ffffff' : SHIELD.core;
+        ctx.lineWidth = Math.max(1.4, r * 0.15);
+        ctx.beginPath();
+        ctx.arc(0, 0, rr, 0, TAU);
+        ctx.stroke();
+
+        if (!outer) {
+          // Interior tint — enough to read as a bubble, light enough that the
+          // player inside it stays the brightest thing.
+          ctx.globalAlpha = alpha * 0.16;
+          ctx.fillStyle = SHIELD.core;
+          ctx.beginPath();
+          ctx.arc(0, 0, rr, 0, TAU);
+          ctx.fill();
+
+          // A highlight travelling around the shell.
+          ctx.globalAlpha = alpha * 0.9;
+          ctx.strokeStyle = SHIELD.bright;
+          ctx.lineWidth = Math.max(1, r * 0.11);
+          ctx.lineCap = 'round';
+          const sweep = world.time * 2.1;
+          ctx.beginPath();
+          ctx.arc(0, 0, rr, sweep, sweep + 0.85);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(0, 0, rr, sweep + Math.PI, sweep + Math.PI + 0.45);
+          ctx.stroke();
+        }
       }
-      ctx.globalAlpha = pulse * 0.18;
-      ctx.fillStyle = shieldColor;
-      ctx.beginPath();
-      ctx.arc(0, 0, r * 1.55, 0, TAU);
-      ctx.fill();
       ctx.restore();
     }
   }
@@ -769,32 +857,6 @@ export class Renderer {
     ctx.restore();
   }
 
-  /**
-   * The personal-best ghost: an outline where you were on your best run.
-   * Drawn hollow and dim so it can never be confused with the live player, and
-   * it takes no part in collision.
-   */
-  _drawGhost(ctx, angle) {
-    const u = this.unit;
-    const orbit = TUNE.playerOrbit * u;
-    const x = this.cx + Math.cos(angle) * orbit;
-    const y = this.cy + Math.sin(angle) * orbit;
-    const r = TUNE.playerTangential * u;
-    const flatten = TUNE.playerRadial / TUNE.playerTangential;
-
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle + Math.PI / 2);
-    ctx.scale(1, flatten);
-    ctx.globalAlpha = 0.34;
-    ctx.strokeStyle = rgba(this.pal.accent, 1);
-    ctx.lineWidth = Math.max(1, r * 0.16);
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.95, 0, TAU);
-    ctx.stroke();
-    ctx.restore();
-  }
-
   _shapePath(ctx, shape, r) {
     ctx.beginPath();
     if (shape === 'square') {
@@ -839,13 +901,15 @@ export class Renderer {
     }
 
     ctx.globalAlpha = 1;
-    if (!this._vignette) {
+    const dark = this.zoneDark || 0;
+    if (!this._vignette || this._vignetteDark !== dark) {
+      this._vignetteDark = dark;
       const v = ctx.createRadialGradient(
         this.cx, this.cy, this.unit * 0.55,
         this.cx, this.cy, Math.hypot(this.w, this.h) * 0.58,
       );
-      v.addColorStop(0, 'rgba(0,0,0,0)');
-      v.addColorStop(1, 'rgba(0,0,0,0.55)');
+      v.addColorStop(0, `rgba(0,0,0,${dark})`);
+      v.addColorStop(1, `rgba(0,0,0,${(0.55 + dark).toFixed(3)})`);
       this._vignette = v;
     }
     ctx.fillStyle = this._vignette;

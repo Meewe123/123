@@ -39,7 +39,7 @@ Notes for review:
 
 ## Pre-submission checklist
 
-- [ ] `npm run verify` passes (icons regenerate, 65 unit tests, 54 e2e checks, 11 bundle checks).
+- [ ] `npm run verify` passes (icons regenerate, 67 unit tests, 52 e2e checks, 11 bundle checks).
 - [ ] `npx cap sync ios` run after the last change to `www/`.
 - [ ] Bundle ID in Xcode matches the one registered on developer.apple.com.
 - [ ] `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` bumped.

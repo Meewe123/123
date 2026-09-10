@@ -147,6 +147,17 @@ const RECIPES = {
 export const EFFECT_IDS = Object.keys(RECIPES);
 
 /**
+ * Which PERFECT effect to play: the equipped effect cosmetic wins, then the
+ * skin's own signature, then the zone's. Pure, so the rule is testable rather
+ * than buried in an event handler.
+ */
+export function resolvePerfectEffect(equippedEffectId, skin, zone) {
+  if (equippedEffectId && equippedEffectId !== 'zone') return equippedEffectId;
+  if (skin && skin.effect && skin.effect !== 'zone') return skin.effect;
+  return zone.fx.perfect;
+}
+
+/**
  * Play a PERFECT. `kind` is the zone's own effect unless a cosmetic overrides
  * it. Reduced-effects mode gets the cheapest recipe in every zone.
  */

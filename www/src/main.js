@@ -25,8 +25,7 @@ import { Renderer } from './game/render.js';
 import { createAutopilot, stepAutopilot } from './game/autopilot.js';
 import { TUNE, POWERUPS, OVERDRIVE_AT, zoneByIndex, skinById } from './game/config.js';
 import { adjustPalette } from './game/palette.js';
-import { playPerfect, playOverdrive } from './game/effects.js';
-import { GhostRecorder, GhostPlayer, bestGhost } from './game/ghost.js';
+import { playPerfect, playOverdrive, resolvePerfectEffect } from './game/effects.js';
 import * as daily from './game/daily.js';
 import * as achievements from './game/achievements.js';
 import * as meta from './game/meta.js';
@@ -52,19 +51,14 @@ class Game {
     this.world = new World((Math.random() * 0xffffffff) >>> 0);
     this.autopilot = createAutopilot({ greedy: true, sloppiness: 0.05 });
 
-    this.recorder = new GhostRecorder();
-    this.ghost = new GhostPlayer(null);
-    this.ghostTimer = 0;
-
     this.store = new LocalStore(this.profile);
     this.leaderboard = new LeaderboardService(this.store);
-    this.dailyBoard = new DailyLeaderboardService(this.store, todayKey());
+    this.dailyBoard = new DailyLeaderboardService(this.store, () => todayKey());
     this.purchases = new PurchaseService();
     this.challenges = new ChallengeService();
     this.challenge = null;
 
     this.deathTimer = 0;
-    this.hitStop = 0;
     this.runCommitted = null;
     this.pendingResult = null;
     this.audioUnlocked = false;
@@ -234,16 +228,19 @@ class Game {
     let runSeed = seed;
     if (runSeed === null) {
       if (mode === 'daily') runSeed = daily.dailySeedFor();
-      else if (this.challenge && this.challenge.mode === 'endless') runSeed = this.challenge.seed;
-      else runSeed = (Math.random() * 0xffffffff) >>> 0;
+      else if (this.challenge && this.challenge.mode === 'endless') {
+        runSeed = this.challenge.seed;
+        // One run against the challenge; after that it is your own game again.
+        this.challenge = null;
+      } else {
+        runSeed = (Math.random() * 0xffffffff) >>> 0;
+      }
     }
 
     this.world.reset(runSeed);
+    // Identifies this run across a revive, so it files one score, not two.
+    this.runId = `${runSeed}:${Date.now()}`;
     this.autopilot = createAutopilot({ greedy: true, sloppiness: 0.05 });
-    this.recorder.reset();
-    // The ghost only paces an endless run: a daily is about today's seed.
-    this.ghost = new GhostPlayer(mode === 'endless' ? this.profile.ghost : null);
-    this.ghostTimer = 0;
     this.fx.clear();
     this.renderer.resetRun();
     this.runCommitted = {
@@ -251,7 +248,6 @@ class Game {
     };
     this.pendingResult = null;
     this.deathTimer = 0;
-    this.hitStop = 0;
     this.mode = 'play';
     this.ui.resetHud();
     this.ui.showGame();
@@ -285,7 +281,6 @@ class Game {
     this.mode = 'attract';
     this.world.reset((Math.random() * 0xffffffff) >>> 0);
     this.autopilot = createAutopilot({ greedy: true, sloppiness: 0.05 });
-    this.ghost = new GhostPlayer(null);
     this.fx.clear();
     this.renderer.resetRun();
     this.ui.show('title');
@@ -361,8 +356,6 @@ class Game {
     const isMultBest = this.profile.bestMultiplier > beforeMult;
 
     const done = meta.applyRun(this.profile, run);
-    const earned = achievements.evaluate(this.profile);
-    meta.syncAchievementCosmetics(this.profile);
 
     if (this.runMode === 'daily') {
       daily.recordDaily(this.profile, {
@@ -374,7 +367,13 @@ class Game {
       });
     }
 
+    // Achievements read the profile, so everything that writes to it has to
+    // have run first — including the daily record that "Regular" tests.
+    const earned = achievements.evaluate(this.profile);
+    meta.syncAchievementCosmetics(this.profile);
+
     const entry = {
+      id: this.runId,
       score: w.score,
       zone: w.zone,
       multiplier: w.bestMultiplier,
@@ -385,12 +384,6 @@ class Game {
     };
     const board = this.runMode === 'daily' ? this.dailyBoard : this.leaderboard;
     board.submit(entry).catch(() => {});
-
-    // The ghost is the best endless run, kept for the next attempt to chase.
-    if (this.runMode === 'endless') {
-      const recorded = this.recorder.toData({ score: w.score, seed: w.seed, mode: 'endless' });
-      this.profile.ghost = bestGhost(this.profile.ghost, recorded);
-    }
 
     c.score = w.score;
     c.shards = w.shards;
@@ -522,6 +515,7 @@ class Game {
     store.flush(this.profile);
     this.ui.setProfile(this.profile);
     this._applySettings();
+    this.ui.setTheme(this._theme(0));
     this.ui.refreshSettings();
     this.ui.refreshTitle();
     this.ui.toast('PROGRESS RESET');
@@ -556,16 +550,8 @@ class Game {
         this.renderer.resetRun();
       }
     } else if (this.mode === 'play') {
-      // A PERFECT stops the world for a couple of frames. The simulation only
-      // ever advances in whole steps, so freezing it changes nothing about
-      // what the rings do — only when they do it.
-      if (this.hitStop > 0) {
-        this.hitStop -= dt;
-      } else {
-        if (this.demo) stepAutopilot(this.world, this.autopilot);
-        this.world.update(dt);
-        this.recorder.sample(this.world);
-      }
+      if (this.demo) stepAutopilot(this.world, this.autopilot);
+      this.world.update(dt);
     } else if (this.mode === 'dying') {
       this.deathTimer -= dt;
       if (this.deathTimer <= 0) this._finishDeath();
@@ -574,10 +560,10 @@ class Game {
     this.world.drainEvents((e) => this._onEvent(e));
     this.fx.update(dt);
 
-    if (this.mode === 'play') this._syncHud(dt);
+    if (this.mode === 'play') this._syncHud();
   }
 
-  _syncHud(dt) {
+  _syncHud() {
     const w = this.world;
     this.ui.setScore(w.score);
     this.ui.setRunShards(w.shards);
@@ -593,26 +579,14 @@ class Game {
       w.difficulty * 0.6 + ((w.multiplier - 1) / (OVERDRIVE_AT - 1)) * 0.45, 0.15, 1,
     ));
 
-    this.ghostTimer -= dt;
-    if (this.ghostTimer <= 0) {
-      this.ghostTimer = 0.25;
-      if (this.ghost.available && this.ghost.angleAt(w.time) !== null) {
-        this.ui.setGhost({ delta: w.score - this.ghost.scoreAt(w.time) });
-      } else {
-        this.ui.setGhost(null);
-      }
-    }
   }
 
   render(frameDt) {
-    const dt = Math.min(frameDt, 0.05);
-    const showGhost = this.mode === 'play' && this.ghost.available;
     this.renderer.draw(this.world, {
       fx: this.fx,
-      dt,
+      dt: Math.min(frameDt, 0.05),
       skinId: this.profile.skin,
       trailId: this.profile.trail,
-      ghostAngle: showGhost ? this.ghost.angleAt(this.world.time) : null,
       intensity: this.mode === 'play' ? 1 : 0.75,
     });
   }
@@ -653,7 +627,7 @@ class Game {
       }
 
       case EVT.PERFECT: {
-        const effectId = this.profile.effect === 'zone' ? zone.fx.perfect : this.profile.effect;
+        const effectId = resolvePerfectEffect(this.profile.effect, skin, zone);
         playPerfect(this.fx, r, {
           kind: effectId,
           angle: e.angle,
@@ -669,7 +643,6 @@ class Game {
           this.fx.addShake(3.5 * (zone.fx.shake || 1));
           this.audio.play('perfect');
           this.haptics.fire('medium');
-          this.hitStop = TUNE.hitStopSeconds;
           this._coach('perfect', 'PERFECT — DEAD CENTRE');
         }
         break;

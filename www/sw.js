@@ -27,7 +27,6 @@ const PRECACHE = [
   'src/game/autopilot.js',
   'src/game/palette.js',
   'src/game/effects.js',
-  'src/game/ghost.js',
   'src/game/daily.js',
   'src/game/achievements.js',
   'src/services/leaderboard.js',

@@ -38,8 +38,9 @@ pointing at third-party content, no gambling, no in-app purchases.
 
 ## Promotional text (170 max, editable without a new build)
 
-`Now with eight zones that each play, sound and shatter differently, a daily run
-everyone shares, and your own best run racing you as a ghost. Still no ads.` [151]
+`Now with eight zones that each play, sound and shatter differently, and a
+daily run everyone shares. Still no ads, no loot boxes, nothing to buy to
+win.` [143]
 
 ---
 
@@ -77,7 +78,6 @@ through and what you can reach from where the last gap left you, and refuses to
 place anything tighter. If you miss, you were late. It was never unfair.
 
 REASONS TO COME BACK
-- Your best run comes back as a ghost and races you.
 - A daily run on a seed everyone shares. One seed, one score.
 - Three missions a day that ask you to play differently.
 - A streak that rewards you and never punishes you.
@@ -113,7 +113,6 @@ The safe-or-greed update.
 - x8 now tips the run into OVERDRIVE.
 - All eight zones rebuilt: each has its own hazard, particles, background,
   synth voice and PERFECT effect.
-- Your best run comes back as a ghost and races you.
 - Daily Run: one seed a day, shared by everyone.
 - New missions that ask you to play differently, and a streak that pays out.
 - Achievements, and cosmetics split into skins, trails and PERFECT effects.
@@ -158,7 +157,7 @@ Suggested caption overlay for each shot (add in your design tool of choice):
 1. "Safe line, or the orb?"
 2. "Eight zones. Each one bites differently."
 3. "x8 tips the run into OVERDRIVE."
-4. "Your best run races you."
+4. "One seed a day. Everyone gets the same rings."
 5. "No ads. Nothing to buy to win."
 
 ## App Preview video (optional but strongly recommended)

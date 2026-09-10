@@ -296,7 +296,7 @@ export class AudioEngine {
       o.frequency.exponentialRampToValueAtTime(noteHz(root - 24), t + 0.22);
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.5 * V.sub, t + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3 * V.sub);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
       o.connect(g).connect(bus);
       o.start(t);
       o.stop(t + 0.34);

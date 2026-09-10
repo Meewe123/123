@@ -612,15 +612,6 @@ body { position: fixed; inset: 0; }
 
 /* ------------------------------------------------------------- HUD ------ */
 
-.ghost-pill {
-  font-size: calc(var(--u) * 2.7);
-  letter-spacing: 0.1em;
-  color: var(--ink-dim);
-  border-color: rgba(255, 255, 255, 0.18);
-}
-.ghost-pill[hidden] { display: none; }
-.ghost-pill.ahead { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 55%, transparent); }
-
 /* The chain meter sits under the multiplier: how close the next step is. */
 #chain-bar {
   position: absolute;
