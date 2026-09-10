@@ -26,7 +26,7 @@ That is the entire control scheme.
 | **The game** | `www/` — a zero-dependency ES-module web app. No engine, no framework, no bundler. |
 | **The native app** | `ios/` — a real Xcode project (Capacitor 8, Swift Package Manager, no CocoaPods). |
 | **The art** | `tools/make_icons.py` — every icon and the launch image are generated from code. |
-| **The tests** | `tests/` — 41 head-less simulation/meta tests, a 37-check browser end-to-end run, and an 11-check run of the single-file build. |
+| **The tests** | `tests/` — 42 head-less simulation/meta tests, a 37-check browser end-to-end run, and an 11-check run of the single-file build. |
 | **The listing** | `store/` — description, keywords, privacy policy, App Privacy answers, review notes, and generated screenshots. |
 
 No ads, no analytics, no in-app purchases, no accounts, no network calls. The
@@ -62,6 +62,12 @@ Two decisions make it more than a reflex test:
 * **The perfect line.** Threading a gap dead-centre is a PERFECT and pays a
   bonus. The safest line and the most profitable line are not the same line.
 
+An orb never sits further off-centre than the gap can spare: reaching for one
+always costs part of your margin, and never all of it.
+
+Shields arrive on a schedule you can count on — ring 10, then every 15 — and
+each one takes two rings before it breaks.
+
 ### Why it never feels cheap
 
 This is the part that took the most care.
@@ -85,12 +91,17 @@ computes two things per ring and refuses to emit anything tighter —
 
 ```
 reach     = separation × (player angular speed ÷ ring speed) × safety
+            − how far off-centre the previous gap could have left you
 gap floor = player half-width + sweep/2 + human margin
 ```
 
 — where `sweep` is everything that moves past you during contact. The first
-keeps the next gap inside the arc you can still reach; the second keeps it wide
-enough for your swept body to fit, with room left for a human reaction time.
+keeps the next gap inside the arc you can reach *from anywhere inside the
+previous gap*, not merely from its centre — you never leave a gap exactly where
+it was aimed, and assuming otherwise is how a hole ends up somewhere nobody
+could get to. The second keeps the gap wide enough for your swept body to fit,
+with room left for a human reaction time.
+
 There is no unwinnable ring: difficulty comes from speed, rotation, gap count
 and the zone hazards. `tests/world.test.mjs` asserts both invariants directly,
 and a reference autopilot (the same code that drives the title-screen attract
@@ -139,6 +150,7 @@ www/
       world.js             the simulation (no DOM — runs in Node)
       render.js            canvas renderer
       meta.js              missions, streak, economy (pure functions)
+      palette.js           nudges zone hues clear of the equipped skin
       autopilot.js         reference player: attract mode + tests
     ui/ui.js               screens, shop, missions, settings, toasts
   sw.js                    offline precache
@@ -154,7 +166,7 @@ store/                     everything App Store Connect asks for
 ## Testing
 
 ```bash
-npm test            # 41 head-less tests: simulation, fairness, economy, assets
+npm test            # 42 head-less tests: simulation, fairness, economy, assets
 npm run test:e2e    # 37 checks in real Chromium at phone/tablet/landscape sizes
 npm run test:bundle # 11 checks driving the single-file build off the filesystem
 npm run verify      # icons + all three suites

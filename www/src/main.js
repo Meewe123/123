@@ -21,6 +21,7 @@ import { World, EVT } from './game/world.js';
 import { Renderer } from './game/render.js';
 import { createAutopilot, stepAutopilot } from './game/autopilot.js';
 import { TUNE, ZONES, POWERUPS, skinById } from './game/config.js';
+import { adjustPalette } from './game/palette.js';
 import * as meta from './game/meta.js';
 
 import { UI } from './ui/ui.js';
@@ -73,7 +74,7 @@ class Game {
     this.haptics.init();
     this.mode = 'attract';
     this.ui.show('title');
-    this.ui.setTheme(ZONES[0].palette);
+    this.ui.setTheme(this._theme(0));
     this.loop.start();
     this._hideNativeSplash();
   }
@@ -158,6 +159,11 @@ class Game {
     this.audio.unlock();
     this.audio.setSfx(this.profile.sfx);
     this.audio.setMusic(this.profile.music);
+  }
+
+  /** The zone palette, nudged clear of whatever skin is equipped. */
+  _theme(zoneIndex = this.world.visualZone) {
+    return adjustPalette(ZONES[zoneIndex % ZONES.length].palette, skinById(this.profile.skin));
   }
 
   _applySettings() {
@@ -299,9 +305,9 @@ class Game {
     store.saveSoon(this.profile);
     this.world.revive();
     this.fx.clear();
-    this.fx.addFlash(0.35, '#7ef0ff');
+    this.fx.addFlash(0.35, this.renderer.shieldColor);
     this.fx.wave(this.renderer.cx, this.renderer.cy, this.renderer.unit * 0.1, this.renderer.unit * 1.2, {
-      color: POWERUPS.shield.color, width: 6, life: 0.7,
+      color: this.renderer.shieldColor, width: 6, life: 0.7,
     });
     this.audio.play('revive');
     this.haptics.fire('success');
@@ -344,6 +350,8 @@ class Game {
       this.haptics.fire('light');
     }
     store.flush(this.profile);
+    // A new skin changes what the rest of the palette has to contrast with.
+    this.ui.setTheme(this._theme());
     this.ui.refreshShop();
     this.ui.refreshTitle();
   }
@@ -427,7 +435,12 @@ class Game {
       this.ui.setScore(w.score);
       this.ui.setRunEnergy(w.energy);
       this.ui.setMultiplier(w.multiplier);
-      this.ui.setPowers({ shield: w.shield, slow: w.slowTimer, double: w.doubleTimer });
+      this.ui.setPowers({
+        shield: w.shieldCharges,
+        shieldColor: this.renderer.shieldColor,
+        slow: w.slowTimer,
+        double: w.doubleTimer,
+      });
       this.audio.setIntensity(clamp(w.difficulty * 0.75 + Math.min(w.combo / 18, 1) * 0.3, 0.15, 1));
     }
   }
@@ -465,11 +478,11 @@ class Game {
       case EVT.PASS: {
         const p = r.orbitPoint(e.angle);
         r.onPass(0.7 + e.precision * 0.6);
-        this.fx.wave(r.cx, r.cy, TUNE.playerOrbit * r.unit, TUNE.playerOrbit * r.unit * 1.35, {
-          color: skin.glow, width: 2.5, life: 0.4,
-        });
-        this.fx.burst(p.x, p.y, 6, {
-          color: skin.trail, speed: 130, size: r.unit * 0.007, life: 0.35, shape: 'spark',
+        // Sparks at the point of the pass, not a ring-shaped ripple: a full
+        // circle at the orbit radius reads as a wall with no way through.
+        this.fx.burst(p.x, p.y, 10, {
+          color: [skin.trail, skin.glow], speed: 190, size: r.unit * 0.008, life: 0.4,
+          shape: 'spark', angle: e.angle, spread: Math.PI * 1.2,
         });
         if (!quiet) {
           this.audio.play('pass', Math.min(this.world.combo, 24));
@@ -517,11 +530,14 @@ class Game {
 
       case EVT.POWERUP: {
         const p = r.orbitPoint(e.angle);
-        const color = POWERUPS[e.kind].color;
+        const color = e.kind === 'shield' ? r.shieldColor : POWERUPS[e.kind].color;
         this.fx.burst(p.x, p.y, 26, { color, speed: 260, size: r.unit * 0.011, life: 0.7 });
         this.fx.wave(p.x, p.y, r.unit * 0.02, r.unit * 0.42, { color, width: 5, life: 0.55 });
         if (!quiet) {
-          this.fx.text(r.cx, r.cy - r.unit * 0.62, POWERUPS[e.kind].label, {
+          const label = e.kind === 'shield'
+            ? `${POWERUPS.shield.label} x${TUNE.shieldCharges}`
+            : POWERUPS[e.kind].label;
+          this.fx.text(r.cx, r.cy - r.unit * 0.62, label, {
             color, size: Math.round(r.unit * 0.085), life: 1.1, vy: -22,
           });
         }
@@ -549,17 +565,21 @@ class Game {
 
       case EVT.SHIELD_BREAK: {
         const p = r.orbitPoint(e.angle);
+        const shield = r.shieldColor;
         this.fx.burst(p.x, p.y, 30, {
-          color: [POWERUPS.shield.color, '#ffffff'], speed: 300, size: r.unit * 0.012, life: 0.6,
+          color: [shield, '#ffffff'], speed: 300, size: r.unit * 0.012, life: 0.6,
         });
-        this.fx.wave(p.x, p.y, r.unit * 0.03, r.unit * 0.5, {
-          color: POWERUPS.shield.color, width: 6, life: 0.5,
-        });
+        this.fx.wave(p.x, p.y, r.unit * 0.03, r.unit * 0.5, { color: shield, width: 6, life: 0.5 });
         this.fx.addShake(14);
-        this.fx.addFlash(0.3, POWERUPS.shield.color);
+        this.fx.addFlash(0.3, shield);
         if (!quiet) {
           this.audio.play('shield');
-          this.haptics.fire('warning');
+          this.haptics.fire(e.remaining > 0 ? 'medium' : 'warning');
+          if (e.remaining > 0) {
+            this.fx.text(r.cx, r.cy + r.unit * 0.66, `SHIELD x${e.remaining}`, {
+              color: shield, size: Math.round(r.unit * 0.055), life: 0.8,
+            });
+          }
         }
         break;
       }
@@ -567,10 +587,12 @@ class Game {
       case EVT.ZONE: {
         if (!quiet) this.ui.showZone(e.zone, e.lap);
         this.audio.setKey(ZONES[e.zone].key);
-        this.ui.setTheme(ZONES[e.zone].palette);
+        this.ui.setTheme(this._theme(e.zone));
         r.onZone();
+        // Thin and quick: a zone change should flash, not leave something that
+        // could be mistaken for a ring sitting on the orbit.
         this.fx.wave(r.cx, r.cy, r.unit * 0.1, r.unit * 1.5, {
-          color: ZONES[e.zone].palette.accent, width: 4, life: 0.9,
+          color: ZONES[e.zone].palette.accent, width: 2, life: 0.6,
         });
         break;
       }

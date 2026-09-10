@@ -47,7 +47,8 @@ export const EVT = {
   ZONE: 'zone',
 };
 
-const POWER_ORDER = ['shield', 'slow', 'double'];
+// Shields are scheduled separately; these two share the spare slot.
+const SPARE_POWERS = ['slow', 'double'];
 
 /** Half the radial span over which a ring is in contact with the player. */
 export const BAND_HALF = TUNE.playerRadial + TUNE.ringThickness / 2;
@@ -62,7 +63,6 @@ const ORB_TOLERANCE = (TUNE.playerTangential + TUNE.orbRadius) / TUNE.playerOrbi
  */
 const BAND_SAMPLE = 0.0025;
 const EDGE_FORGIVENESS = 0.02;
-const REACH_SAFETY = 0.72;
 
 let nextRingId = 1;
 
@@ -93,11 +93,15 @@ export class World {
     this.rings = [];
     this.spawnCount = 0;
     this.ringsSincePower = 0;
+    this.powerCursor = 0;
     this.cursor = TUNE.playerOrbit + 0.40;
     this.lastTargetAngle = this.player.angle;
     this.lastTargetTravel = TUNE.playerOrbit;
+    // How far off the aimed angle the player could have been when they cleared
+    // the previous ring — anywhere inside its gap.
+    this.lastTargetHalf = 0;
 
-    this.shield = false;
+    this.shieldCharges = 0;
     this.shieldTimer = 0;
     this.slowTimer = 0;
     this.doubleTimer = 0;
@@ -112,6 +116,11 @@ export class World {
 
   get difficulty() {
     return difficultyAt(this.score);
+  }
+
+  /** A shield is up while it still has charges left. */
+  get shield() {
+    return this.shieldCharges > 0;
   }
 
   get multiplier() {
@@ -280,7 +289,11 @@ export class World {
     const wanted = zone.gapHalf * lerp(1, 0.76, d) * (opts.halfScale ?? 1);
     const floor = this._minGapHalf(ring);
     const half = Math.max(floor, wanted);
-    ring.slack = half - (floor - TUNE.gapMargin);
+    // How far off-centre an orb may sit: whatever this gap has beyond the
+    // required minimum, plus half the human margin. Reaching for it always
+    // costs something, and never costs everything — even on a gap that is
+    // already as tight as the generator will allow.
+    ring.slack = (half - floor) + TUNE.gapMargin * 0.5;
 
     for (let i = 0; i < gapCount; i++) {
       ring.gaps.push({ c: wrap((TAU / gapCount) * i + rng.range(-0.16, 0.16)), half });
@@ -293,11 +306,21 @@ export class World {
 
   _populateOrbs(ring, opts) {
     const rng = this.rng;
-    this.ringsSincePower++;
+    const index = this.spawnCount;
 
-    if (this.ringsSincePower >= TUNE.powerupEvery && this.spawnCount > 6 && !opts.noPower) {
+    // Shields land on a fixed schedule so the player can count on them.
+    const shieldDue = index >= TUNE.shieldFirst
+      && (index - TUNE.shieldFirst) % TUNE.shieldEvery === 0;
+    if (shieldDue && !opts.noPower) {
       this.ringsSincePower = 0;
-      const type = POWER_ORDER[Math.floor(this.spawnCount / TUNE.powerupEvery) % POWER_ORDER.length];
+      ring.orbs.push({ gapIndex: rng.int(0, ring.gaps.length - 1), offset: 0, type: 'shield', taken: false });
+      return;
+    }
+
+    this.ringsSincePower++;
+    if (this.ringsSincePower >= TUNE.powerupEvery && index > 6 && !opts.noPower) {
+      this.ringsSincePower = 0;
+      const type = SPARE_POWERS[this.powerCursor++ % SPARE_POWERS.length];
       ring.orbs.push({ gapIndex: rng.int(0, ring.gaps.length - 1), offset: 0, type, taken: false });
       return;
     }
@@ -306,7 +329,7 @@ export class World {
     const gi = rng.int(0, ring.gaps.length - 1);
     // Off-centre by as much as the gap can spare, so collecting energy costs
     // precision on a wide ring and is free on none.
-    const offset = rng.range(-0.7, 0.7) * ring.slack;
+    const offset = rng.range(-0.75, 0.75) * ring.slack;
     ring.orbs.push({ gapIndex: gi, offset, type: 'energy', taken: false });
   }
 
@@ -318,11 +341,18 @@ export class World {
     const rng = this.rng;
     const gi = rng.int(0, ring.gaps.length - 1);
     const gapTravel = Math.max(0.05, ring.spawnTravel - this.lastTargetTravel);
-    const budget = Math.min(Math.PI, gapTravel * this.angularBudgetPerUnit * REACH_SAFETY);
+    const budget = Math.min(Math.PI, gapTravel * this.angularBudgetPerUnit * TUNE.reachSafety);
+
+    // The player does not leave the previous ring at the angle it was aimed
+    // at — they leave from wherever inside its gap they happened to pass. The
+    // new gap has to be reachable from the far edge of that gap, not just from
+    // its centre, or a run can contain a hole nobody could have got to.
+    const spread = Math.max(0, this.lastTargetHalf - PLAYER_HALF);
+    const room = Math.max(0, budget - spread);
 
     // Ease the player in: the opening rings barely ask them to move.
     const warmup = clamp(this.spawnCount / 6, 0.25, 1);
-    const magnitude = budget * rng.range(0.15, 1.0) * warmup;
+    const magnitude = room * rng.range(0.15, 1.0) * warmup;
     const target = wrap(this.lastTargetAngle + rng.sign() * magnitude);
 
     const tc = World.crossTravel(ring);
@@ -335,6 +365,7 @@ export class World {
 
     this.lastTargetAngle = target;
     this.lastTargetTravel = ring.spawnTravel;
+    this.lastTargetHalf = ring.gaps[gi].half;
     return ring;
   }
 
@@ -349,7 +380,7 @@ export class World {
 
     // Twin zone: a second ring hard on the heels of the first.
     if (zone.flags.twin && this.spawnCount % 3 === 0) {
-      const partnerTravel = travel + Math.max(0.16, this._spacing() * 0.42);
+      const partnerTravel = travel + Math.max(0.20, this._spacing() * 0.5);
       const partner = this._aimRing(
         this._makeRing(partnerTravel, zoneIndex, { gapCount: 1, noPower: true }),
       );
@@ -531,7 +562,8 @@ export class World {
   }
 
   _grantPower(kind) {
-    if (kind === 'shield') this.shield = true;
+    // A fresh shield always comes with its full complement of charges.
+    if (kind === 'shield') this.shieldCharges = TUNE.shieldCharges;
     else if (kind === 'slow') this.slowTimer = TUNE.slowDuration;
     else if (kind === 'double') this.doubleTimer = TUNE.doubleDuration;
   }
@@ -540,10 +572,10 @@ export class World {
     ring.state = 'broken';
     ring.hitFlash = 1;
     if (this.shieldTimer > 0) return;
-    if (this.shield) {
-      this.shield = false;
+    if (this.shieldCharges > 0) {
+      this.shieldCharges--;
       this.shieldTimer = 0.85;
-      this.emit(EVT.SHIELD_BREAK, { angle });
+      this.emit(EVT.SHIELD_BREAK, { angle, remaining: this.shieldCharges });
       return;
     }
     this.alive = false;
@@ -564,6 +596,7 @@ export class World {
     this.cursor = TUNE.playerOrbit + 0.40;
     this.lastTargetAngle = this.player.angle;
     this.lastTargetTravel = TUNE.playerOrbit;
+    this.lastTargetHalf = 0;
     this._topUpField();
     return this;
   }
@@ -575,9 +608,14 @@ export class World {
     this.combo = 0;
     this.shieldTimer = TUNE.reviveShield;
     this.rings = this.rings.filter((r) => r.travel > 0.95);
-    this.cursor = this.rings.reduce((m, r) => Math.max(m, r.travel), 0.95);
+    // If clearing the danger zone emptied the field, give the player the same
+    // run-up they get at the start of a run rather than nothing to aim at.
+    this.cursor = this.rings.length
+      ? this.rings.reduce((m, r) => Math.max(m, r.travel), 0)
+      : TUNE.playerOrbit + 0.40;
     this.lastTargetAngle = this.player.angle;
     this.lastTargetTravel = TUNE.playerOrbit;
+    this.lastTargetHalf = 0;
     this._topUpField();
     return this;
   }

@@ -10,6 +10,7 @@ import { TAU, clamp, lerp, wrap } from '../engine/util.js';
 import { FONT } from '../engine/fx.js';
 import { World } from './world.js';
 import { TUNE, ZONES, skinById, POWERUPS } from './config.js';
+import { adjustPalette } from './palette.js';
 
 const STAR_COUNT = 130;
 const TRAIL_LEN = 26;
@@ -27,7 +28,7 @@ function mixInto(cur, target, t) {
   cur[2] = lerp(cur[2], target[2], t);
 }
 
-const PALETTE_KEYS = ['bg0', 'bg1', 'ring', 'ringDim', 'accent', 'orb', 'grid'];
+const PALETTE_KEYS = ['bg0', 'bg1', 'ring', 'ringDim', 'accent', 'orb', 'grid', 'shield'];
 
 export class Renderer {
   constructor(canvas) {
@@ -42,11 +43,15 @@ export class Renderer {
     this.reduced = false;
 
     this.pal = {};
-    const first = ZONES[0].palette;
-    for (const k of PALETTE_KEYS) this.pal[k] = hexToRgb(first[k]);
+    this._targetHex = adjustPalette(ZONES[0].palette, skinById('aurora'));
+    this._paletteKey = '';
+    for (const k of PALETTE_KEYS) this.pal[k] = hexToRgb(this._targetHex[k]);
 
     this.stars = [];
     this.trail = [];
+    this._skyGradient = null;
+    this._skyKey = '';
+    this._vignette = null;
     this.corePulse = 0;
     this.coreSpin = 0;
     this.skyRot = 0;
@@ -72,6 +77,9 @@ export class Renderer {
     this.cx = cssW / 2;
     this.cy = cssH / 2;
     this.unit = Math.min(cssW, cssH) / 2;
+    this._skyGradient = null;
+    this._skyKey = '';
+    this._vignette = null;
     this._buildStars();
   }
 
@@ -104,11 +112,23 @@ export class Renderer {
     this.zoneFlash = 0;
   }
 
-  /** Blend the live palette toward the zone the player is about to enter. */
-  _mixPalette(zoneIndex, dt) {
-    const target = ZONES[zoneIndex % ZONES.length].palette;
+  /**
+   * Blend the live palette toward the zone the player is about to enter,
+   * after nudging that zone's hues clear of the equipped skin.
+   */
+  _mixPalette(zoneIndex, skinId, dt) {
+    const key = `${zoneIndex}|${skinId}`;
+    if (key !== this._paletteKey) {
+      this._paletteKey = key;
+      this._targetHex = adjustPalette(ZONES[zoneIndex % ZONES.length].palette, skinById(skinId));
+    }
     const t = 1 - Math.exp(-3.2 * dt);
-    for (const k of PALETTE_KEYS) mixInto(this.pal[k], hexToRgb(target[k]), t);
+    for (const k of PALETTE_KEYS) mixInto(this.pal[k], hexToRgb(this._targetHex[k]), t);
+  }
+
+  /** The current shield colour, chosen to contrast with the equipped skin. */
+  get shieldColor() {
+    return this._targetHex.shield;
   }
 
   // ---------------------------------------------------------------- draw ---
@@ -121,7 +141,7 @@ export class Renderer {
     this.zoneFlash = Math.max(0, this.zoneFlash - dt * 1.6);
     this.coreSpin += dt * (0.25 + this.corePulse * 0.8);
     this.skyRot += dt * (this.reduced ? 0.004 : 0.012) * (1 + world.speedScale * 0.35);
-    this._mixPalette(world.visualZone, dt);
+    this._mixPalette(world.visualZone, skinId, dt);
 
     ctx.save();
     ctx.scale(this.dpr, this.dpr);
@@ -141,24 +161,34 @@ export class Renderer {
 
   _drawSky(ctx, intensity) {
     const p = this.pal;
-    const g = ctx.createRadialGradient(
-      this.cx, this.cy, this.unit * 0.05,
-      this.cx, this.cy, Math.hypot(this.w, this.h) * 0.62,
-    );
-    g.addColorStop(0, rgba(p.bg1, 1));
-    g.addColorStop(0.55, rgba(p.bg0, 1));
-    g.addColorStop(1, `rgb(${(p.bg0[0] * 0.45) | 0},${(p.bg0[1] * 0.45) | 0},${(p.bg0[2] * 0.45) | 0})`);
-    ctx.fillStyle = g;
+    // The background is a full-screen gradient fill, the single most expensive
+    // thing on the frame. Rebuild the gradient object only when the palette has
+    // actually moved a visible amount, and keep the starfield down to one
+    // fillStyle for the whole loop.
+    const key = `${p.bg0[0] | 0},${p.bg0[1] | 0},${p.bg0[2] | 0},${p.bg1[0] | 0},${p.bg1[1] | 0},${p.bg1[2] | 0}`;
+    if (key !== this._skyKey || !this._skyGradient) {
+      this._skyKey = key;
+      const g = ctx.createRadialGradient(
+        this.cx, this.cy, this.unit * 0.05,
+        this.cx, this.cy, Math.hypot(this.w, this.h) * 0.62,
+      );
+      g.addColorStop(0, rgba(p.bg1, 1));
+      g.addColorStop(0.55, rgba(p.bg0, 1));
+      g.addColorStop(1, `rgb(${(p.bg0[0] * 0.45) | 0},${(p.bg0[1] * 0.45) | 0},${(p.bg0[2] * 0.45) | 0})`);
+      this._skyGradient = g;
+    }
+    ctx.fillStyle = this._skyGradient;
     ctx.fillRect(0, 0, this.w, this.h);
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = rgba(this.pal.accent, 1);
     for (const s of this.stars) {
       const a = s.a + this.skyRot * s.depth;
       const x = this.cx + Math.cos(a) * s.r;
       const y = this.cy + Math.sin(a) * s.r;
       const tw = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(this.skyRot * 9 + s.tw));
-      ctx.fillStyle = rgba(this.pal.accent, 0.10 + 0.30 * s.depth * tw * intensity);
+      ctx.globalAlpha = 0.10 + 0.30 * s.depth * tw * intensity;
       ctx.fillRect(x, y, s.size, s.size);
     }
     ctx.restore();
@@ -340,7 +370,9 @@ export class Renderer {
       const x = this.cx + Math.cos(a) * radius;
       const y = this.cy + Math.sin(a) * radius;
       const isPower = orb.type !== 'energy';
-      const color = isPower ? POWERUPS[orb.type].color : `rgb(${this.pal.orb.join(',')})`;
+      const color = isPower
+        ? (orb.type === 'shield' ? this.shieldColor : POWERUPS[orb.type].color)
+        : `rgb(${this.pal.orb.join(',')})`;
       const r = (isPower ? TUNE.orbRadius * 1.5 : TUNE.orbRadius) * u;
       const bob = 1 + Math.sin(world.time * 7 + ring.id) * 0.10;
 
@@ -399,8 +431,10 @@ export class Renderer {
     this.trail.push({ x, y });
     while (this.trail.length > TRAIL_LEN) this.trail.shift();
 
-    // Trail
+    // Trail — sized off the body's thickness so it reads as a wake, not as the
+    // player itself.
     if (!this.reduced && this.trail.length > 2) {
+      const rR = r * flatten;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.lineCap = 'round';
@@ -410,8 +444,8 @@ export class Renderer {
         ctx.moveTo(this.trail[0].x, this.trail[0].y);
         for (let i = 1; i < this.trail.length; i++) ctx.lineTo(this.trail[i].x, this.trail[i].y);
         ctx.strokeStyle = skin.trail;
-        ctx.globalAlpha = pass === 0 ? 0.16 : 0.4;
-        ctx.lineWidth = pass === 0 ? r * 1.5 : r * 0.55;
+        ctx.globalAlpha = pass === 0 ? 0.13 : 0.32;
+        ctx.lineWidth = pass === 0 ? rR * 2.0 : rR * 0.8;
         ctx.stroke();
       }
       ctx.restore();
@@ -433,14 +467,14 @@ export class Renderer {
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.4);
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.2);
     g.addColorStop(0, skin.glow);
-    g.addColorStop(0.25, skin.glow);
+    g.addColorStop(0.22, skin.glow);
     g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.55;
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(x, y, r * 3.4, 0, TAU);
+    ctx.arc(x, y, r * 3.2, 0, TAU);
     ctx.fill();
     ctx.restore();
 
@@ -450,32 +484,46 @@ export class Renderer {
     // Local x runs along the orbit, local y across it.
     ctx.scale(squash, flatten * (2 - squash));
 
+    // A dark rim keeps the body from dissolving into a bright ring behind it.
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(4,7,14,0.85)';
+    ctx.lineWidth = Math.max(1.5, r * 0.30);
+    this._shapePath(ctx, skin.shape, r);
+    ctx.stroke();
+
     ctx.fillStyle = skin.glow;
     this._shapePath(ctx, skin.shape, r);
     ctx.fill();
     ctx.fillStyle = skin.core;
-    this._shapePath(ctx, skin.shape, r * 0.52);
+    this._shapePath(ctx, skin.shape, r * 0.58);
     ctx.fill();
     ctx.restore();
 
-    // Shield bubble
-    const shieldOn = world.shield || world.shieldTimer > 0;
-    if (shieldOn) {
-      const pulse = world.shieldTimer > 0 && !world.shield
+    // Shield bubbles: one ring per remaining charge.
+    const charges = world.shieldCharges || 0;
+    const flashing = world.shieldTimer > 0 && charges === 0;
+    if (charges > 0 || flashing) {
+      const shieldColor = this.shieldColor;
+      const pulse = flashing
         ? 0.4 + 0.6 * Math.abs(Math.sin(world.time * 22))
-        : 0.75 + 0.25 * Math.sin(world.time * 5);
+        : 0.7 + 0.3 * Math.sin(world.time * 5);
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(a + Math.PI / 2);
-      ctx.scale(1, Math.max(flatten, 0.55));
-      ctx.globalAlpha = pulse;
-      ctx.strokeStyle = POWERUPS.shield.color;
-      ctx.lineWidth = Math.max(1.5, r * 0.16);
+      ctx.scale(1, Math.max(flatten, 0.62));
+      const rings = Math.max(1, charges);
+      for (let i = 0; i < rings; i++) {
+        ctx.globalAlpha = pulse * (i === 0 ? 1 : 0.55);
+        ctx.strokeStyle = shieldColor;
+        ctx.lineWidth = Math.max(1.5, r * 0.15);
+        ctx.beginPath();
+        ctx.arc(0, 0, r * (1.55 + i * 0.42), 0, TAU);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = pulse * 0.18;
+      ctx.fillStyle = shieldColor;
       ctx.beginPath();
-      ctx.arc(0, 0, r * 1.7, 0, TAU);
-      ctx.stroke();
-      ctx.globalAlpha = pulse * 0.25;
-      ctx.fillStyle = POWERUPS.shield.color;
+      ctx.arc(0, 0, r * 1.55, 0, TAU);
       ctx.fill();
       ctx.restore();
     }
@@ -525,13 +573,16 @@ export class Renderer {
     }
 
     ctx.globalAlpha = 1;
-    const v = ctx.createRadialGradient(
-      this.cx, this.cy, this.unit * 0.55,
-      this.cx, this.cy, Math.hypot(this.w, this.h) * 0.58,
-    );
-    v.addColorStop(0, 'rgba(0,0,0,0)');
-    v.addColorStop(1, 'rgba(0,0,0,0.55)');
-    ctx.fillStyle = v;
+    if (!this._vignette) {
+      const v = ctx.createRadialGradient(
+        this.cx, this.cy, this.unit * 0.55,
+        this.cx, this.cy, Math.hypot(this.w, this.h) * 0.58,
+      );
+      v.addColorStop(0, 'rgba(0,0,0,0)');
+      v.addColorStop(1, 'rgba(0,0,0,0.55)');
+      this._vignette = v;
+    }
+    ctx.fillStyle = this._vignette;
     ctx.fillRect(0, 0, this.w, this.h);
     ctx.restore();
   }

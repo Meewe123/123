@@ -72,7 +72,7 @@ test('every generated ring is reachable — the reference player survives', () =
   assert.ok(median >= 120, `median run was only ${median} rings`);
 });
 
-test('an aimed gap always sits inside the arc the player can still cover', () => {
+test('an aimed gap is reachable from anywhere inside the previous gap', () => {
   // Every ring the generator emits must be reachable from the previous one,
   // otherwise the run contains a wall the player cannot pass by any input.
   let checked = 0;
@@ -82,7 +82,7 @@ test('an aimed gap always sits inside the arc the player can still cover', () =>
     const seen = new Set(w.rings.map((r) => r.id));
     // Mirror the world's own spawn bookkeeping: the reference point drifts
     // inward with the field, exactly like the previous ring does.
-    const previous = { angle: w.lastTargetAngle, travel: w.lastTargetTravel };
+    const previous = { angle: w.lastTargetAngle, travel: w.lastTargetTravel, half: w.lastTargetHalf };
     for (let i = 0; i < 120 * 90 && w.alive; i++) {
       const budgetPerUnit = w.angularBudgetPerUnit;
       const step = TUNE.ringSpeed * w.speedScale * DT;
@@ -95,11 +95,17 @@ test('an aimed gap always sits inside the arc the player can still cover', () =>
         seen.add(ring.id);
         const separation = ring.spawnTravel - previous.travel;
         const budget = Math.min(Math.PI, Math.max(separation, 0) * budgetPerUnit);
-        const needed = angleDist(ring.targetAngle, previous.angle);
+        // The player leaves the previous ring from anywhere inside its gap, so
+        // the new gap has to be reachable from that gap's far edge — not just
+        // from the angle it was aimed at.
+        const spread = Math.max(0, previous.half - PLAYER_HALF);
+        const needed = angleDist(ring.targetAngle, previous.angle) + spread;
         assert.ok(needed <= budget + 1e-6,
-          `seed ${seed} ring ${ring.id}: needs ${needed.toFixed(3)} rad, only ${budget.toFixed(3)} reachable`);
+          `seed ${seed} ring ${ring.id}: needs ${needed.toFixed(3)} rad from the gap edge, `
+          + `only ${budget.toFixed(3)} reachable`);
         previous.angle = ring.targetAngle;
         previous.travel = ring.spawnTravel;
+        previous.half = ring.gaps[ring.targetGap].half;
         checked++;
       }
     }
@@ -115,19 +121,58 @@ test('flipping reverses the orbit and is reported as an event', () => {
   assert.ok(w.events.some((e) => e.type === EVT.FLIP));
 });
 
-test('a shield absorbs exactly one hit', () => {
+test('a shield always takes two rings before it breaks', () => {
   const w = new World(21);
   w._grantPower('shield');
+  assert.equal(w.shieldCharges, TUNE.shieldCharges);
+  assert.equal(w.shieldCharges, 2, 'a shield is worth two rings');
   assert.equal(w.shield, true);
+
   w._onCollision(w.rings[0], w.player.angle);
-  assert.equal(w.alive, true, 'shield saved the run');
-  assert.equal(w.shield, false, 'shield was consumed');
-  assert.ok(w.events.some((e) => e.type === EVT.SHIELD_BREAK));
+  assert.equal(w.alive, true, 'the first hit is absorbed');
+  assert.equal(w.shieldCharges, 1);
+  const first = w.events.find((e) => e.type === EVT.SHIELD_BREAK);
+  assert.equal(first.remaining, 1, 'the event reports what is left');
 
   w.shieldTimer = 0;
   w.events.length = 0;
   w._onCollision(w.rings[1] || w.rings[0], w.player.angle);
-  assert.equal(w.alive, false, 'the second hit ends the run');
+  assert.equal(w.alive, true, 'the second hit is absorbed too');
+  assert.equal(w.shieldCharges, 0);
+  assert.equal(w.shield, false);
+
+  w.shieldTimer = 0;
+  w.events.length = 0;
+  w._onCollision(w.rings[0], w.player.angle);
+  assert.equal(w.alive, false, 'the third hit ends the run');
+});
+
+test('shields arrive on a schedule the player can count on', () => {
+  const w = new World(3);
+  const scheduled = [];
+  const seen = new Set();
+  const collect = () => {
+    for (const ring of w.rings) {
+      if (seen.has(ring.id)) continue;
+      seen.add(ring.id);
+      if (ring.orbs.some((o) => o.type === 'shield')) scheduled.push(seen.size - 1);
+    }
+  };
+  collect();
+  const bot = createAutopilot({ greedy: false });
+  for (let i = 0; i < 120 * 200 && seen.size < 60; i++) {
+    stepAutopilot(w, bot);
+    w.update(DT);
+    w.events.length = 0;
+    collect();
+    if (!w.alive) w.reset(3);
+  }
+  assert.ok(scheduled.length >= 3, `only ${scheduled.length} shields in the first 60 rings`);
+  assert.equal(scheduled[0], TUNE.shieldFirst, `first shield at ring ${scheduled[0]}`);
+  for (let i = 1; i < scheduled.length; i++) {
+    assert.equal(scheduled[i] - scheduled[i - 1], TUNE.shieldEvery,
+      `shields ${scheduled[i - 1]} -> ${scheduled[i]} are not ${TUNE.shieldEvery} apart`);
+  }
 });
 
 test('slow-motion slows the whole world, leaving the geometry unchanged', () => {

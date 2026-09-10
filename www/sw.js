@@ -25,6 +25,7 @@ const PRECACHE = [
   'src/game/render.js',
   'src/game/meta.js',
   'src/game/autopilot.js',
+  'src/game/palette.js',
   'src/ui/ui.js',
   'assets/icons/icon-180.png',
   'assets/icons/icon-192.png',

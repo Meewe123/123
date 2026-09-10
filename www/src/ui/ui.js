@@ -179,10 +179,10 @@ export class UI {
     if (m > 1) this.el.multiplier.classList.add('bump');
   }
 
-  /** timers: { shield: bool, slow: seconds, double: seconds } */
+  /** timers: { shield: charges, shieldColor, slow: seconds, double: seconds } */
   setPowers(timers) {
     const want = new Map();
-    if (timers.shield) want.set('shield', '');
+    if (timers.shield > 0) want.set('shield', `x${timers.shield}`);
     if (timers.slow > 0) want.set('slow', `${Math.ceil(timers.slow)}s`);
     if (timers.double > 0) want.set('double', `${Math.ceil(timers.double)}s`);
 
@@ -197,10 +197,13 @@ export class UI {
       if (!chip) {
         chip = document.createElement('div');
         chip.className = 'power-chip';
-        chip.style.color = POWERUPS[key].color;
+        chip.style.color = key === 'shield' && timers.shieldColor
+          ? timers.shieldColor
+          : POWERUPS[key].color;
         this.el.powerbar.appendChild(chip);
         this._chips.set(key, chip);
       }
+      if (key === 'shield' && timers.shieldColor) chip.style.color = timers.shieldColor;
       const label = `${POWERUPS[key].label}${suffix ? ` ${suffix}` : ''}`;
       if (chip.textContent !== label) chip.textContent = label;
     }
@@ -222,7 +225,7 @@ export class UI {
     this.setScore(0);
     this.setRunEnergy(0);
     this.setMultiplier(1);
-    this.setPowers({ shield: false, slow: 0, double: 0 });
+    this.setPowers({ shield: 0, slow: 0, double: 0 });
     this.el.zoneBanner.classList.remove('show');
   }
 

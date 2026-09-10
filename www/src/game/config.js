@@ -8,21 +8,23 @@ export const TUNE = {
   playerOrbit: 0.44,
   // The player is a lens, not a ball: narrow across the ring it is crossing,
   // wide along its own orbit. The radial half-extent sets how long a ring
-  // touches the player, which is what the collision test has to survive.
-  playerRadial: 0.018,
-  playerTangential: 0.042,
+  // touches the player, which is what the collision test has to survive — and
+  // it is also what makes the player visible, so both matter.
+  playerRadial: 0.030,
+  playerTangential: 0.050,
   spawnRadius: 1.30,
   despawnRadius: 0.05,
-  playerAngularSpeed: 2.20,
-  ringSpeed: 0.42,
-  ringThickness: 0.020,
-  orbRadius: 0.024,
-  baseSpacing: 0.40,
-  minSpacing: 0.32,
+  playerAngularSpeed: 2.35,
+  ringSpeed: 0.48,
+  ringThickness: 0.018,
+  orbRadius: 0.026,
+  baseSpacing: 0.42,
+  minSpacing: 0.38,
   // Slack on top of the geometric minimum. The minimum only guarantees a gap
-  // is *possible*; this is the room a human's reaction time needs on top of it
-  // (~60 ms of orbit at full speed).
-  gapMargin: 0.17,
+  // is *possible*; this is the room a human's reaction time needs on top of it.
+  gapMargin: 0.15,
+  // How much of the reachable arc the generator will actually use.
+  reachSafety: 0.85,
   slowFactor: 0.55,
   slowDuration: 4.0,
   doubleDuration: 7.0,
@@ -33,9 +35,14 @@ export const TUNE = {
   reviveCost: 150,
   zoneLength: 14,
   orbChance: 0.62,
+  // Shields are on their own schedule: ring 10, then every 15 after that.
+  shieldFirst: 10,
+  shieldEvery: 15,
+  // A shield always eats two rings before it breaks.
+  shieldCharges: 2,
+  // Slow-mo and double-score share this slot between shield drops.
   powerupEvery: 11,
-};
-/**
+};/**
  * 0..1 difficulty ramp. Tuned so the gap between rings goes 1.0s -> 0.6s over
  * the first hundred rings and then flattens out near 0.4s, which is about as
  * fast as a thumb can usefully react.
@@ -121,9 +128,9 @@ export const ZONES = [
     name: 'STORM',
     key: -4,
     palette: P('#1a1403', '#4a3a06', '#ffd23f', '#8a6a10', '#fffbe6', '#ff7edb', '#5f4a09'),
-    gaps: () => 3,
+    gaps: () => 2,
     gapHalf: 0.45,
-    rot: [1.00, 1.50],
+    rot: [1.05, 1.55],
     flags: {},
   },
   {
