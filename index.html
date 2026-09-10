@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Тихая вода</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background: #071d27;
+    color: #d7eee7;
+    font-family: system-ui, sans-serif;
+  }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  header {
+    position: fixed; top: max(30px, env(safe-area-inset-top));
+    width: 100%; text-align: center; pointer-events: none;
+    padding: 0 22px;
+  }
+  h1 {
+    font: 300 clamp(25px, 5vw, 39px) Georgia, serif;
+    letter-spacing: .13em; margin: 0 0 12px;
+  }
+  header p { font-size: 13px; opacity: .6; line-height: 1.7; }
+  footer {
+    position: fixed; bottom: max(25px, env(safe-area-inset-bottom));
+    left: 0; width: 100%;
+    display: flex; justify-content: center; gap: 10px;
+    flex-wrap: wrap; padding: 0 16px;
+  }
+  button {
+    border: 1px solid #b7e7dc30; border-radius: 30px;
+    background: #12313c99; backdrop-filter: blur(12px);
+    color: #d7eee7; padding: 13px 20px; cursor: pointer;
+    font: inherit; font-size: 13px;
+    transition: background .3s, border-color .3s;
+  }
+  button:hover { background: #214a55; border-color: #b7e7dc77; }
+  button:focus-visible { outline: 2px solid #d5ffe7; outline-offset: 4px; }
+  #hint {
+    position: fixed; bottom: 95px; width: 100%; text-align: center;
+    font-size: 12px; letter-spacing: .08em; opacity: .45;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="pond" aria-label="Спокойный пруд: водите пальцем или мышью, чтобы создавать волны"></canvas>
+<header>
+  <h1>Тихая вода</h1>
+  <p>Коснись воды. Приблизься к огонькам.<br>Здесь никуда не нужно успевать.</p>
+</header>
+<div id="hint">Можно просто смотреть</div>
+<footer>
+  <button id="sound" aria-pressed="false">♫ Включить звук</button>
+  <button id="rest" aria-pressed="false">Пауза</button>
+  <button id="bloom">Раскрыть цветок</button>
+</footer>
+
+<script>
+const canvas = document.querySelector('#pond');
+const ctx = canvas.getContext('2d');
+const soundButton = document.querySelector('#sound');
+const restButton = document.querySelector('#rest');
+
+let W, H, dpr, background;
+let time = 0, last = 0, paused = false;
+let ripples = [], sparks = [], flowers = [], lights = [];
+let pointer = { x: -1000, y: -1000, inside: false };
+let nextWave = 0, nextAmbient = 0, lastNote = -10;
+
+const random = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+function resize() {
+  W = innerWidth;
+  H = innerHeight;
+  dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  background = ctx.createRadialGradient(
+    W * .5, H * .42, 0, W * .5, H * .5, Math.max(W, H) * .8
+  );
+  background.addColorStop(0, '#17434b');
+  background.addColorStop(.5, '#0c2c38');
+  background.addColorStop(1, '#05151f');
+  lights = Array.from({ length: Math.max(9, Math.round(W / 85)) }, makeLight);
+}
+
+function makeLight() {
+  return {
+    x: random(W * .08, W * .92),
+    y: random(H * .26, H * .77),
+    phase: random(0, Math.PI * 2),
+    speed: random(.3, .7),
+    cooldown: 0
+  };
+}
+addEventListener('resize', resize);
+resize();
+
+// Звук синтезируется прямо в браузере: никаких внешних файлов.
+let audio, master, rainGain, enabled = false;
+function prepareAudio() {
+  if (audio) return;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) throw new Error('Web Audio unavailable');
+
+  audio = new AudioContext();
+  master = audio.createGain();
+  master.gain.value = 0;
+  master.connect(audio.destination);
+
+  const buffer = audio.createBuffer(1, audio.sampleRate * 6, audio.sampleRate);
+  const samples = buffer.getChannelData(0);
+  let brown = 0;
+  for (let i = 0; i < samples.length; i++) {
+    brown = (brown + (Math.random() * 2 - 1) * .022) / 1.022;
+    samples[i] = brown * 3;
+  }
+  const noise = audio.createBufferSource();
+  noise.buffer = buffer;
+  noise.loop = true;
+
+  const filter = audio.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 950;
+
+  rainGain = audio.createGain();
+  rainGain.gain.value = .32;
+  noise.connect(filter);
+  filter.connect(rainGain);
+  rainGain.connect(master);
+  noise.start();
+}
+
+function syncAudio() {
+  if (!audio) return;
+  master.gain.setTargetAtTime(
+    enabled && !paused && !document.hidden ? .18 : 0,
+    audio.currentTime, .4
+  );
+}
+
+soundButton.onclick = async () => {
+  try {
+    prepareAudio();
+    await audio.resume();
+    enabled = !enabled;
+    syncAudio();
+    soundButton.textContent = enabled ? '♫ Звук включён' : '♫ Включить звук';
+    soundButton.setAttribute('aria-pressed', enabled);
+  } catch {
+    soundButton.textContent = 'Звук недоступен';
+  }
+};
+
+function note(x, special = false) {
+  if (!audio || !enabled || paused || time - lastNote < .17) return;
+  lastNote = time;
+  const scale = [261.63, 293.66, 329.63, 392, 440, 523.25];
+  const pitch = scale[clamp(Math.floor(x / W * scale.length), 0, scale.length - 1)];
+  const start = audio.currentTime;
+
+  const pan = audio.createStereoPanner();
+  pan.pan.value = clamp(x / W * 1.4 - .7, -.7, .7);
+  pan.connect(master);
+
+  [1, 2].forEach((harmonic, index) => {
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(pitch * harmonic, start);
+    oscillator.frequency.exponentialRampToValueAtTime(
+      pitch * harmonic * .995, start + 2.4
+    );
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(
+      (special ? .22 : .11) / (index * 4 + 1), start + .045
+    );
+    gain.gain.exponentialRampToValueAtTime(.0001, start + 2.8);
+    oscillator.connect(gain);
+    gain.connect(pan);
+    oscillator.start(start);
+    oscillator.stop(start + 3);
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      gain.disconnect();
+      if (index === 1) pan.disconnect();
+    };
+  });
+}
+
+function wave(x, y, strength = 1) {
+  ripples.push({ x, y, age: 0, strength });
+  if (ripples.length > 100) ripples.shift();
+}
+
+function flower(x, y) {
+  flowers.push({ x, y, age: 0, angle: random(0, 6.28), size: random(15, 24) });
+  if (flowers.length > 24) flowers.shift();
+  wave(x, y, 1.5);
+  note(x, true);
+  for (let i = 0; i < 14; i++) {
+    const a = random(0, Math.PI * 2);
+    const speed = random(7, 30);
+    sparks.push({ x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, age: 0 });
+  }
+}
+
+function move(e) {
+  pointer.x = e.clientX;
+  pointer.y = e.clientY;
+  pointer.inside = true;
+}
+canvas.addEventListener('pointermove', move);
+canvas.addEventListener('pointerdown', e => {
+  move(e);
+  if (paused) return;
+  wave(pointer.x, pointer.y, 1.2);
+  note(pointer.x);
+});
+canvas.addEventListener('pointerleave', () => pointer.inside = false);
+canvas.addEventListener('pointercancel', () => pointer.inside = false);
+canvas.addEventListener('pointerup', e => {
+  if (e.pointerType !== 'mouse') pointer.inside = false;
+});
+
+document.querySelector('#bloom').onclick = () => {
+  if (!paused) flower(random(W * .2, W * .8), random(H * .35, H * .7));
+};
+restButton.onclick = () => {
+  paused = !paused;
+  pointer.inside = false;
+  restButton.textContent = paused ? 'Продолжить' : 'Пауза';
+  restButton.setAttribute('aria-pressed', paused);
+  syncAudio();
+};
+document.addEventListener('visibilitychange', () => {
+  pointer.inside = false;
+  last = performance.now();
+  syncAudio();
+});
+
+function glow(x, y, radius, alpha) {
+  const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  gradient.addColorStop(0, `rgba(209,255,208,${alpha})`);
+  gradient.addColorStop(.18, `rgba(153,232,194,${alpha * .45})`);
+  gradient.addColorStop(1, 'rgba(130,220,190,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+}
+
+function render(dt) {
+  time += dt;
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, W, H);
+
+  // Медленные подводные течения.
+  for (let i = 0; i < 9; i++) {
+    ctx.beginPath();
+    for (let x = 0; x <= W + 20; x += 20) {
+      const y = H * (.14 + i * .1) +
+        Math.sin(x * .004 + time * .16 + i) * 24;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = 'rgba(139,214,199,.035)';
+    ctx.lineWidth = 14;
+    ctx.stroke();
+  }
+
+  if (time > nextAmbient) {
+    wave(random(0, W), random(H * .2, H * .9), .38);
+    nextAmbient = time + random(1.1, 2.4);
+  }
+  if (pointer.inside && time > nextWave) {
+    wave(pointer.x, pointer.y, .65);
+    nextWave = time + .22;
+  }
+
+  ripples = ripples.filter(r => r.age < 4.5);
+  for (const r of ripples) {
+    r.age += dt;
+    for (let ring = 0; ring < 3; ring++) {
+      const radius = r.age * 29 - ring * 12;
+      if (radius <= 0) continue;
+      const alpha = Math.max(0, 1 - r.age / 4.5) * .23 * r.strength;
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y, radius, radius * .62, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(179,234,219,${alpha})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  for (const light of lights) {
+    light.cooldown = Math.max(0, light.cooldown - dt);
+    const x = light.x + Math.sin(time * light.speed + light.phase) * 17;
+    const y = light.y + Math.cos(time * light.speed * .7 + light.phase) * 12;
+    if (light.cooldown > 0) continue;
+
+    const pulse = .5 + Math.sin(time * 1.4 + light.phase) * .15;
+    glow(x, y, 29, pulse);
+    ctx.beginPath();
+    ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = '#e2ffce';
+    ctx.fill();
+
+    if (pointer.inside && Math.hypot(pointer.x - x, pointer.y - y) < 40) {
+      flower(x, y);
+      light.cooldown = 10;
+      light.x = random(W * .08, W * .92);
+      light.y = random(H * .27, H * .76);
+    }
+  }
+
+  flowers = flowers.filter(f => f.age < 24);
+  for (const f of flowers) {
+    f.age += dt;
+    f.x += Math.sin(time * .3 + f.angle) * dt * 2;
+    f.y -= dt * 1.5;
+    const opening = Math.min(1, f.age / 2.8);
+    const opacity = Math.min(1, f.age) * Math.min(1, (24 - f.age) / 5);
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.scale(opening, opening * .72);
+    ctx.rotate(f.angle + f.age * .035);
+    ctx.globalAlpha = Math.max(0, opacity) * .75;
+    for (let petal = 0; petal < 7; petal++) {
+      ctx.rotate(Math.PI * 2 / 7);
+      ctx.beginPath();
+      ctx.ellipse(0, -f.size * .55, f.size * .3, f.size * .62, 0, 0, Math.PI * 2);
+      ctx.fillStyle = petal % 2 ? '#a7d9cf' : '#cee5d6';
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#f3e5af';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  sparks = sparks.filter(s => s.age < 3);
+  for (const s of sparks) {
+    s.age += dt;
+    s.x += s.vx * dt;
+    s.y += s.vy * dt;
+    s.vx *= Math.exp(-dt * .8);
+    s.vy *= Math.exp(-dt * .8);
+    glow(s.x, s.y, 9, Math.max(0, 1 - s.age / 3) * .45);
+  }
+}
+
+function frame(now) {
+  const dt = Math.min((now - (last || now)) / 1000, .05);
+  last = now;
+  if (!paused && !document.hidden) render(dt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
