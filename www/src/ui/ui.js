@@ -7,7 +7,7 @@
 import { commas, mmss, clamp } from '../engine/util.js';
 import { ZONES, POWERUPS, TUNE, OVERDRIVE_AT, COSMETIC_KINDS, zoneByIndex } from '../game/config.js';
 import {
-  isComplete, unlockState, kindOf, collectionProgress, nextStreakMilestone,
+  isComplete, unlockState, kindOf, collectionProgress, nextStreakMilestone, visibleItems,
 } from '../game/meta.js';
 import { listed as listedAchievements, progress as achievementProgress } from '../game/achievements.js';
 
@@ -47,6 +47,7 @@ export class UI {
     this._chips = new Map();
     this._toastTimer = 0;
     this._coachTimer = 0;
+    this._coachUntil = 0;
     this._bind();
   }
 
@@ -121,6 +122,15 @@ export class UI {
 
   setProfile(profile) {
     this.profile = profile;
+  }
+
+  /**
+   * Whether this build can sell anything. With no billing bridge the premium
+   * skins are not "locked", they are unreachable — so they are not shown at all
+   * rather than dangled. They come back by themselves once a store exists.
+   */
+  _premiumOffered() {
+    return this.h.purchasesAvailable?.() !== false;
   }
 
   /** Keep the interface tinted with the zone the player is currently in. */
@@ -211,8 +221,14 @@ export class UI {
   coach(text, ms = 2200) {
     this.el.coach.textContent = text;
     this.el.coach.classList.add('on');
+    this._coachUntil = Date.now() + ms;
     clearTimeout(this._coachTimer);
     this._coachTimer = setTimeout(() => this.el.coach.classList.remove('on'), ms);
+  }
+
+  /** True while a coaching line is still on screen and must not be replaced. */
+  coachBusy() {
+    return Date.now() < this._coachUntil;
   }
 
   resetHud() {
@@ -224,6 +240,7 @@ export class UI {
     this.setMultiplier(1, 0);
     this.setPowers({ shield: 0, slow: 0, double: 0 });
     this.el.coach.classList.remove('on');
+    this._coachUntil = 0;
     this.el.zoneBanner.classList.remove('show');
   }
 
@@ -279,9 +296,12 @@ export class UI {
     $('over-orbs').textContent = commas(result.orbs);
 
     const greed = $('over-greed');
-    greed.innerHTML = result.orbs
+    const saves = result.chainSaves
+      ? ` · <b>${commas(result.chainSaves)}</b> chain${result.chainSaves === 1 ? '' : 's'} held`
+      : '';
+    greed.innerHTML = (result.orbs
       ? `<b>${commas(result.greedOrbs)}</b> greed · ${commas(result.safeOrbs)} safe · <b>+${commas(result.shards)}</b> shards`
-      : `<b>+${commas(result.shards)}</b> shards`;
+      : `<b>+${commas(result.shards)}</b> shards`) + saves;
 
     const revive = $('btn-revive');
     revive.classList.toggle('hidden', !result.canRevive);
@@ -397,7 +417,8 @@ export class UI {
     $('pr-orbs').textContent = commas(p.totalOrbs);
     $('pr-streak').textContent = String(p.streak || 0);
 
-    const cp = collectionProgress(p);
+    const premium = this._premiumOffered();
+    const cp = collectionProgress(p, { premium });
     $('collection-count').textContent = `${cp.owned}/${cp.total}`;
 
     const grid = $('collection-grid');
@@ -410,7 +431,7 @@ export class UI {
       block.appendChild(heading);
       const row = document.createElement('div');
       row.className = 'chip-row';
-      for (const item of kind.items) {
+      for (const item of visibleItems(kind.id, { premium })) {
         const state = unlockState(p, kind.id, item.id);
         const owned = state === 'owned' || state === 'equipped';
         const chip = document.createElement('button');
@@ -484,7 +505,7 @@ export class UI {
     const kind = kindOf(this.shopTab);
     const grid = $('shop-grid');
     grid.innerHTML = '';
-    for (const item of kind.items) {
+    for (const item of visibleItems(kind.id, { premium: this._premiumOffered() })) {
       const state = unlockState(p, kind.id, item.id);
       const card = document.createElement('button');
       card.type = 'button';

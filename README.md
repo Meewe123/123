@@ -60,12 +60,17 @@ The game is the choice inside that:
   it pays double shards and advances your chain by two, which is the only fast
   way to x8. Roughly a third to a half of rings pose the question; the rest let
   you breathe.
-* **The perfect line.** Threading a gap dead-centre is a PERFECT: a bonus, a
-  hit-stop, and an effect unique to the zone you are in. The safest line, the
-  most profitable line and the most beautiful line are three different lines.
+* **The perfect line.** Every gap carries a marked window across its middle.
+  Pass inside it and the ring scores a PERFECT: a bonus, an effect unique to the
+  zone you are in — and, when the orb you just let go was a greed orb, your
+  chain survives instead of breaking. That is what makes an unreachable orb a
+  decision rather than a flat loss. The safest line, the most profitable line
+  and the most beautiful line are three different lines.
 * **The chain.** Miss an orb on a ring that had one and the chain resets to
-  zero. At x8 the run enters **OVERDRIVE** — the halo, the trail, the music and
-  the PERFECTs all step up. It is a state, not a power-up: nothing gets easier.
+  zero — unless it was a greed orb and you threaded the marked centre. A safe
+  orb is always reachable, so precision never excuses leaving one. At x8 the run
+  enters **OVERDRIVE** — the halo, the trail, the music and the PERFECTs all
+  step up. It is a state, not a power-up: nothing gets easier.
 
 The shield owns one colour, a saturated blue, and nothing else in the game is
 allowed near it — every skin is kept at least 40° of hue away, and orbs are
@@ -319,16 +324,19 @@ privacy URLs before you submit; App Review checks that both load.
   or third currency.** One currency, SHARDS, earned by playing.
 * **No fake anything.** `LeaderboardService` reports `isGlobal === false` and
   the UI says "YOUR RECORDS", because there is no server. `PurchaseService`
-  reports `available === false` and premium items say so, because there is no
-  billing bridge — it never simulates a purchase. Both are interfaces a real
-  backend can implement without gameplay changing.
+  reports `available === false`, and because it does, the two premium skins are
+  not listed at all — in the shop or in the collection total. A build with no
+  billing bridge does not dangle an item nobody can buy, and it never simulates
+  a purchase. Both are interfaces a real backend can implement without gameplay
+  changing; the skins reappear by themselves the day a bridge exists.
 * **No Game Center.** Adding it means linking `GameKit` and touching an Apple
   account, which is what currently lets the app carry a *Data Not Collected*
   privacy label. `LeaderboardService` is the seam if you want to make that trade.
 
 The monetisation the architecture is built for is voluntary cosmetics: two
-premium skins already route through `PurchaseService`. Nothing sold changes how
-the game plays, and the two achievement-gated skins can never be bought.
+premium skins already route through `PurchaseService`, and stay hidden until it
+can actually sell them. Nothing sold changes how the game plays, and the
+achievement-gated skins can never be bought.
 
 ## Tuning the game
 

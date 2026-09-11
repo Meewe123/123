@@ -1,6 +1,6 @@
 {
   "name": "orbital-rush",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Orbital Rush \u2014 a one-thumb neon arcade game about the choice between a safe line and a greedy one. Zero dependencies at runtime.",
   "type": "module",

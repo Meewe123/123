@@ -136,6 +136,7 @@ class Game {
         label: daily.dailyLabel(todayKey()),
         date: new Date().toDateString().toUpperCase(),
       }),
+      purchasesAvailable: () => this.purchases.available,
       dailyBoardLabel: () => this.dailyBoard.label,
       dailyBoard: () => this.dailyBoard.top(5),
     };
@@ -303,6 +304,7 @@ class Game {
       greedOrbs: w.greedOrbs,
       safeOrbs: w.safeOrbs,
       perfects: w.perfects,
+      chainSaves: w.chainSaves,
       bestMultiplier: w.bestMultiplier,
       bestChain: w.bestChain,
       zoneReached: w.zone,
@@ -521,10 +523,18 @@ class Game {
     this.ui.toast('PROGRESS RESET');
   }
 
-  /** Show a coaching line once in the player's life, then never again. */
+  /**
+   * Show a coaching line once in the player's life, then never again.
+   *
+   * A line already on screen is never replaced: several events can land in the
+   * same drain — a PERFECT is emitted just before the PASS that carried it —
+   * and a line that is overwritten in the same frame would be spent without
+   * anybody reading it. The id stays unseen instead, so it gets its turn on a
+   * later beat.
+   */
   _coach(id, text) {
     const seen = this.profile.tutorialSeen || (this.profile.tutorialSeen = []);
-    if (seen.includes(id)) return;
+    if (seen.includes(id) || this.ui.coachBusy()) return;
     seen.push(id);
     this.ui.coach(text);
     store.saveSoon(this.profile);
@@ -622,6 +632,7 @@ class Game {
         if (!quiet) {
           this.audio.play('pass', Math.min(this.world.combo, 24));
           this.haptics.fire('light');
+          this._coach('aim', 'THREAD THE MARKED CENTRE FOR A PERFECT');
         }
         break;
       }
@@ -636,14 +647,18 @@ class Game {
           accent: zone.palette.accent,
         });
         if (!quiet) {
-          const label = r.orbitPoint(e.angle, TUNE.playerOrbit + 0.20);
-          this.fx.text(label.x, label.y, 'PERFECT', {
-            color: '#ffd23f', size: Math.round(r.unit * 0.075), life: 0.75,
-          });
+          // A save is the one worth saying out loud: the player let a greed orb
+          // go and kept the chain anyway, which is the whole point of threading
+          // the centre.
+          const text = e.saved ? 'PERFECT · CHAIN HELD' : 'PERFECT';
+          const size = Math.round(r.unit * (e.saved ? 0.055 : 0.075));
+          const label = r.labelPoint(e.angle, TUNE.playerOrbit + 0.20, text, size);
+          this.fx.text(label.x, label.y, text, { color: '#ffd23f', size, life: 0.85 });
           this.fx.addShake(3.5 * (zone.fx.shake || 1));
           this.audio.play('perfect');
           this.haptics.fire('medium');
-          this._coach('perfect', 'PERFECT — DEAD CENTRE');
+          this._coach('perfect', 'PERFECT — YOU THREADED THE MARKED CENTRE');
+          if (e.saved) this._coach('save', 'DEAD CENTRE HOLDS A CHAIN YOU COULD NOT REACH');
         }
         break;
       }
@@ -655,11 +670,11 @@ class Game {
           color, speed: e.greed ? 230 : 170, size: r.unit * 0.008, life: 0.45,
         });
         if (!quiet) {
-          const label = r.orbitPoint(e.angle, TUNE.playerOrbit - 0.13);
-          this.fx.text(label.x, label.y, e.greed ? `+${e.gain} GREED` : `+${e.gain}`, {
-            color: e.greed ? '#ffd23f' : '#ffe66d',
-            size: Math.round(r.unit * (e.greed ? 0.055 : 0.06)),
-            life: 0.65,
+          const text = e.greed ? `+${e.gain} GREED` : `+${e.gain}`;
+          const size = Math.round(r.unit * (e.greed ? 0.055 : 0.06));
+          const label = r.labelPoint(e.angle, TUNE.playerOrbit - 0.13, text, size);
+          this.fx.text(label.x, label.y, text, {
+            color: e.greed ? '#ffd23f' : '#ffe66d', size, life: 0.65,
           });
           this.audio.play(e.greed ? 'greed' : 'orb', e.combo);
           this.haptics.fire(e.greed ? 'medium' : 'light');

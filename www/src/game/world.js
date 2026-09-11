@@ -89,6 +89,7 @@ export class World {
     this.greedOrbs = 0;
     this.safeOrbs = 0;
     this.perfects = 0;
+    this.chainSaves = 0;
     this.bestMultiplier = 1;
     this.bestChain = 0;
     this.overdriveRings = 0;
@@ -327,9 +328,13 @@ export class World {
     // Shields land on a fixed schedule so the player can count on them.
     const shieldDue = index >= TUNE.shieldFirst
       && (index - TUNE.shieldFirst) % TUNE.shieldEvery === 0;
+    // Every orb goes in gap 0 and `_aimRing` moves it to whichever gap the ring
+    // ends up aimed at. Only the aimed gap is guaranteed to be reachable, so an
+    // orb anywhere else is not a choice — it is a tax on a ring the player read
+    // correctly.
     if (shieldDue && !opts.noPower) {
       this.ringsSincePower = 0;
-      ring.orbs.push({ gapIndex: rng.int(0, ring.gaps.length - 1), offset: 0, type: 'shield', taken: false });
+      ring.orbs.push({ gapIndex: 0, offset: 0, type: 'shield', taken: false });
       return;
     }
 
@@ -337,12 +342,11 @@ export class World {
     if (this.ringsSincePower >= TUNE.powerupEvery && index > 6 && !opts.noPower) {
       this.ringsSincePower = 0;
       const type = SPARE_POWERS[this.powerCursor++ % SPARE_POWERS.length];
-      ring.orbs.push({ gapIndex: rng.int(0, ring.gaps.length - 1), offset: 0, type, taken: false });
+      ring.orbs.push({ gapIndex: 0, offset: 0, type, taken: false });
       return;
     }
 
     if (!rng.chance(TUNE.orbChance)) return;
-    const gi = rng.int(0, ring.gaps.length - 1);
     // The heart of the game: an orb is either sitting near the safe line, or
     // out where taking it costs most of your margin. Draw from the two ends
     // rather than uniformly, so most rings pose an actual question instead of
@@ -351,7 +355,7 @@ export class World {
     const risk = rng.chance(0.45) ? rng.range(0.55, 1) : rng.range(0, 0.35);
     const offset = rng.sign() * risk * TUNE.orbReach * ring.slack;
     ring.orbs.push({
-      gapIndex: gi,
+      gapIndex: 0,
       offset,
       risk,
       greed: risk >= TUNE.greedThreshold,
@@ -389,6 +393,8 @@ export class World {
     ring.rot = World.rotAt(ring, ring.travel);
     ring.targetGap = gi;
     ring.targetAngle = target;
+    // The orbs follow the aim: see `_populateOrbs`.
+    for (const orb of ring.orbs) orb.gapIndex = gi;
 
     this.lastTargetAngle = target;
     this.lastTargetTravel = ring.spawnTravel;
@@ -569,8 +575,16 @@ export class World {
     const precision = 1 - clamp(ring.centreDist / ring.centreHalf, 0, 1);
     const isPerfect = precision >= TUNE.perfectThreshold;
     const collected = ring.collected;
+    const shardOrb = ring.orbs.find((o) => o.type === 'shard');
+    const hadOrb = !!shardOrb;
 
-    if (collected === 0 && this.combo > 0 && ring.orbs.some((o) => o.type === 'shard')) {
+    // Skipping an orb costs the chain — unless the orb you let go was a GREED
+    // orb and you threaded the ring dead centre instead. That is what PERFECT
+    // is *for*: it turns "that one was too far out" from a flat loss into a
+    // decision you can still win. A safe orb is always reachable, so letting
+    // one go is nobody's fault but yours and precision does not excuse it.
+    const saved = isPerfect && collected === 0 && !!shardOrb && shardOrb.greed && this.combo > 0;
+    if (collected === 0 && this.combo > 0 && hadOrb && !saved) {
       const before = this.multiplier;
       const lost = this.combo;
       this.combo = 0;
@@ -581,7 +595,8 @@ export class World {
     if (isPerfect) {
       this.perfects++;
       this.shards += 1;
-      this.emit(EVT.PERFECT, { angle: this.player.angle, precision });
+      this.chainSaves += saved ? 1 : 0;
+      this.emit(EVT.PERFECT, { angle: this.player.angle, precision, saved });
     } else if (precision < 0.16) {
       this.emit(EVT.NEAR, { angle: this.player.angle });
     }

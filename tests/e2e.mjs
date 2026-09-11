@@ -255,8 +255,16 @@ async function main() {
     await page.waitForSelector('#screen-title.on', { timeout: 3000 });
     await page.locator('#btn-shop').click();
     await page.waitForSelector('#screen-shop.on', { timeout: 3000 });
+    // This build ships no billing bridge, so the two premium skins are not
+    // offered at all. Dangling an item nobody can buy is worse than not having
+    // it; they come back by themselves the day a store exists.
+    const sellable = await page.evaluate(() => globalThis.__ORBITAL__.purchases.available);
+    const expectedSkins = sellable ? 12 : 10;
     const skinCount = await page.locator('#shop-grid .skin').count();
-    check('shop lists every skin', skinCount === 12, `found ${skinCount}`);
+    check('shop lists every skin this build can hand over',
+      skinCount === expectedSkins, `found ${skinCount}, expected ${expectedSkins}`);
+    check('nothing is marked PREMIUM when there is no store to buy from',
+      sellable || !/PREMIUM/i.test(await page.locator('#shop-grid').innerText()));
     check('starter skin is equipped', await page.locator('#shop-grid .skin.equipped').count() === 1);
     check('the shop has three categories', await page.locator('#shop-tabs .tab').count() === 3);
     // Scan the item cards, not the footer — the footer says "no loot boxes",
@@ -306,9 +314,13 @@ async function main() {
     console.log('\ncollection');
     await page.locator('#btn-collection').click();
     await page.waitForSelector('#screen-collection.on', { timeout: 3000 });
-    check('the collection lists every cosmetic',
-      await page.locator('#collection-grid .chip').count() === 24,
-      `found ${await page.locator('#collection-grid .chip').count()}`);
+    const expectedChips = sellable ? 24 : 22;
+    const chipCount = await page.locator('#collection-grid .chip').count();
+    check('the collection lists every cosmetic this build can hand over',
+      chipCount === expectedChips, `found ${chipCount}, expected ${expectedChips}`);
+    check('the collection total matches what it lists',
+      (await page.locator('#collection-count').innerText()).endsWith(`/${expectedChips}`),
+      await page.locator('#collection-count').innerText());
     check('achievements are listed', await page.locator('#achievement-list .ach').count() === 12);
     await page.screenshot({ path: `${SHOTS}/08-collection.png` });
 
@@ -356,6 +368,21 @@ async function main() {
         `overflow ${overflow.x}x${overflow.y}`);
       check(`canvas fills the viewport at ${label}`, Math.abs(overflow.canvasW - size.width) <= 1,
         `canvas=${overflow.canvasW}`);
+      // The coaching line is the longest string the HUD ever shows. It used to
+      // be nowrap with no width, so on a narrow phone its first and last words
+      // ran off both edges.
+      const coach = await page.evaluate(() => {
+        const el = document.getElementById('coach');
+        el.textContent = 'DEAD CENTRE HOLDS A CHAIN YOU COULD NOT REACH';
+        el.classList.add('on');
+        const box = el.getBoundingClientRect();
+        el.classList.remove('on');
+        return { left: box.left, right: box.right, width: window.innerWidth };
+      });
+      check(`the longest coaching line fits at ${label}`,
+        coach.left >= -0.5 && coach.right <= coach.width + 0.5,
+        `${coach.left.toFixed(0)}..${coach.right.toFixed(0)} in ${coach.width}`);
+
       await page.screenshot({ path: `${SHOTS}/10-${label}.png` });
     }
 

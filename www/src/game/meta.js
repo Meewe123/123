@@ -247,14 +247,26 @@ export function nextUnlockable(profile) {
   return buyable[0] || null;
 }
 
-export function collectionProgress(profile) {
+/**
+ * Counts only what the player can actually get. A build with no billing bridge
+ * cannot sell its premium skins, and a collection that reads 22/24 forever is a
+ * worse experience than one that reads 22/22 and is honest about it.
+ */
+export function collectionProgress(profile, { premium = true } = {}) {
   let owned = 0;
   let total = 0;
   for (const kind of COSMETIC_KINDS) {
-    total += kind.items.length;
-    owned += kind.items.filter((i) => owns(profile, kind.id, i.id)).length;
+    const items = visibleItems(kind.id, { premium });
+    total += items.length;
+    owned += items.filter((i) => owns(profile, kind.id, i.id)).length;
   }
   return { owned, total };
+}
+
+/** The items of a kind that this build can actually hand over. */
+export function visibleItems(kind, { premium = true } = {}) {
+  const items = kindOf(kind).items;
+  return premium ? items : items.filter((i) => i.unlock !== 'premium');
 }
 
 // --------------------------------------------------------------- lifetime ---

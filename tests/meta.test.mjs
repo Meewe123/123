@@ -213,3 +213,21 @@ test('the collection reports honest progress', () => {
   assert.equal(start.owned, 3, 'one starter per category');
   assert.ok(start.total >= 20);
 });
+
+test('a build with no store does not count what it cannot sell', () => {
+  // Premium skins need a billing bridge. Without one they are not "locked",
+  // they are unreachable, and a collection stuck two short of full forever is
+  // a worse experience than one that is honest about what this build contains.
+  const profile = store.migrate(null);
+  const withStore = meta.collectionProgress(profile);
+  const without = meta.collectionProgress(profile, { premium: false });
+  const premiumCount = SKINS.filter((s) => s.unlock === 'premium').length;
+
+  assert.ok(premiumCount > 0, 'there are premium skins to hide');
+  assert.equal(withStore.total - without.total, premiumCount);
+  assert.equal(withStore.owned, without.owned, 'nobody owns a premium skin yet');
+
+  const shown = meta.visibleItems('skin', { premium: false });
+  assert.ok(shown.every((i) => i.unlock !== 'premium'));
+  assert.equal(meta.visibleItems('skin').length, SKINS.length);
+});

@@ -102,8 +102,11 @@ test('OVERDRIVE announces itself once, when the multiplier tops out', () => {
 
   w.combo = 0;
   const ring = w.rings[0];
-  // Feed the chain one orb at a time until it caps out.
-  for (let i = 0; i < 40; i++) {
+  // Feed the chain one orb at a time until it caps out. Derived from the tuning
+  // rather than a fixed count, so changing the ladder cannot silently stop this
+  // test from reaching the top.
+  const links = TUNE.comboPerMultiplier * TUNE.maxMultiplier + 2;
+  for (let i = 0; i < links; i++) {
     ring.orbs = [{ gapIndex: 0, offset: 0, risk: 0, greed: false, type: 'shard', taken: false }];
     const rot = ring.rot;
     w._collectOrbs(ring, ring.travel, rot, rot + World.gapCenterAt(ring, 0, ring.travel));

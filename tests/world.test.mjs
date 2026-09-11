@@ -380,3 +380,110 @@ test('the ring you must clear next is already fully on screen', () => {
       `next ring at ${next.toFixed(3)} is outside the visible radius ${visible.toFixed(3)}`);
   }
 });
+
+/** A ring already scored down to what `_clearRing` reads, so the rule can be
+ *  tested on its own rather than through a whole run. */
+function scoredRing({ dist = 0, half = 1, collected = 0, orb = null }) {
+  return {
+    state: 'crossing',
+    centreDist: dist,
+    centreHalf: half,
+    collected,
+    orbs: orb ? [{ type: 'shard', greed: orb === 'greed', taken: collected > 0 }] : [],
+    power: null,
+  };
+}
+
+test('threading the centre holds a chain a greed orb would have broken', () => {
+  const w = new World(5);
+  w.combo = 8;
+  w._clearRing(scoredRing({ dist: 0, orb: 'greed' }));
+  assert.equal(w.combo, 8, 'a PERFECT pass holds the chain');
+  assert.equal(w.chainSaves, 1, 'and the run counts the save');
+
+  w.combo = 8;
+  w._clearRing(scoredRing({ dist: 0.9, orb: 'greed' }));
+  assert.equal(w.combo, 0, 'scraping past the same orb still costs the chain');
+  assert.equal(w.chainSaves, 1, 'a scrape is not a save');
+});
+
+test('a safe orb you skipped costs the chain however well you passed', () => {
+  // Safe orbs are always reachable, so precision does not excuse leaving one.
+  const w = new World(5);
+  w.combo = 6;
+  w._clearRing(scoredRing({ dist: 0, orb: 'safe' }));
+  assert.equal(w.combo, 0);
+  assert.equal(w.chainSaves, 0);
+});
+
+test('a PERFECT never grants chain on its own', () => {
+  // The save is a rescue, not a reward: an empty ring threaded dead centre
+  // leaves the multiplier exactly where it was.
+  const w = new World(5);
+  w.combo = 5;
+  w._clearRing(scoredRing({ dist: 0 }));
+  assert.equal(w.combo, 5);
+  assert.equal(w.perfects, 1);
+});
+
+test('every orb sits in the gap the ring is aimed at', () => {
+  // Only the aimed gap is guaranteed reachable. An orb in any other opening is
+  // a chain the player loses through no fault of their own.
+  for (const seed of [4, 19, 44, 77]) {
+    const w = new World(seed);
+    const bot = createAutopilot({ greedy: true });
+    const seen = new Set();
+    let checked = 0;
+    for (let i = 0; i < 120 * 120 && w.alive; i++) {
+      stepAutopilot(w, bot);
+      w.update(DT);
+      w.events.length = 0;
+      for (const ring of w.rings) {
+        if (seen.has(ring.id)) continue;
+        seen.add(ring.id);
+        for (const orb of ring.orbs) {
+          assert.equal(orb.gapIndex, ring.targetGap,
+            `seed ${seed} ring ${ring.id}: orb parked in gap ${orb.gapIndex}, aim is ${ring.targetGap}`);
+          checked++;
+        }
+      }
+    }
+    assert.ok(checked > 20, `only inspected ${checked} orbs`);
+  }
+});
+
+test('greed and dead centre are different lines', () => {
+  // If every greed orb sat inside the PERFECT window, reaching for greed would
+  // cost nothing and the choice the game is built on would not exist.
+  let greed = 0;
+  let outside = 0;
+  for (const seed of [6, 23, 51]) {
+    const w = new World(seed);
+    const bot = createAutopilot({ greedy: false });
+    const seen = new Set();
+    for (let i = 0; i < 120 * 120 && w.alive; i++) {
+      stepAutopilot(w, bot);
+      w.update(DT);
+      w.events.length = 0;
+      for (const ring of w.rings) {
+        if (seen.has(ring.id)) continue;
+        seen.add(ring.id);
+        for (const orb of ring.orbs) {
+          if (orb.type !== 'shard') continue;
+          const window = ring.gaps[orb.gapIndex].half * (1 - TUNE.perfectThreshold);
+          if (!orb.greed) {
+            assert.ok(Math.abs(orb.offset) <= window,
+              `a safe orb at ${orb.offset.toFixed(3)} sits outside the PERFECT window ${window.toFixed(3)}`);
+            continue;
+          }
+          greed++;
+          if (Math.abs(orb.offset) > window) outside++;
+        }
+      }
+    }
+  }
+  assert.ok(greed > 40, `only sampled ${greed} greed orbs`);
+  const share = outside / greed;
+  assert.ok(share > 0.25 && share < 0.75,
+    `${(share * 100).toFixed(0)}% of greed orbs force the choice — the tension is ${share <= 0.25 ? 'gone' : 'constant'}`);
+});

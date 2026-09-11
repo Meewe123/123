@@ -52,8 +52,18 @@ export const TUNE = {
   slowDuration: 4.0,
   doubleDuration: 7.0,
   reviveShield: 2.4,
-  perfectThreshold: 0.60,
-  comboPerMultiplier: 4,
+  // A PERFECT is a pass whose centre lands inside the middle (1 - this) of a
+  // gap's half-width — the window the renderer draws. It is deliberately
+  // narrower than the furthest a greed orb can sit, so reaching for greed and
+  // threading the centre are genuinely different lines rather than the same
+  // one. `tests/world.test.mjs` holds the two apart.
+  perfectThreshold: 0.78,
+  // Links per step of the multiplier. Once every orb was placed in a gap the
+  // player can actually reach, chains stopped breaking by accident and four
+  // links a step put a bot at x8 by ring 34 — OVERDRIVE as a default rather
+  // than a peak. Six keeps the ladder moving inside a short run (about x4 by
+  // ring 30) while x8 stays something a run has to earn.
+  comboPerMultiplier: 6,
   maxMultiplier: 8,
   reviveCost: 150,
   zoneLength: 14,

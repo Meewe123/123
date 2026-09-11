@@ -134,3 +134,47 @@ export function adjustPalette(zonePalette, skin) {
 
   return out;
 }
+
+
+/**
+ * The two tones a cartoon body needs beyond the skin's own colour, derived so a
+ * new skin never has to hand-pick them.
+ *
+ * `ink` is the outline. A flat black outline turns the player into a token, so
+ * it is a deep shade of the body itself — but a pale body has no dark shade of
+ * its own, so the lighter the body, the more the ink leans on the skin's
+ * authored rim. `shade` is the crescent along the edge away from the light.
+ *
+ * This lives here rather than in the renderer so the legibility test in
+ * `tests/content.test.mjs` can measure the ink the game actually draws.
+ */
+export function skinTones(skin) {
+  const lean = 0.62 + 0.34 * lightness(skin.glow);
+  return {
+    ink: mixHex(shadeHex(skin.glow, 0.55), skin.rim || '#04070e', lean),
+    shade: shadeHex(skin.glow, 0.76),
+  };
+}
+
+/** A darker shade of a colour, keeping its hue. */
+export function shadeHex(hex, k) {
+  const [r, g, b] = hexToRgb(hex);
+  return rgbToHex([r * k, g * k, b * k]);
+}
+
+/** Blend `hex` toward `toward` by k. */
+export function mixHex(hex, toward, k) {
+  const a = hexToRgb(hex);
+  const b = hexToRgb(toward);
+  return rgbToHex([
+    a[0] + (b[0] - a[0]) * k,
+    a[1] + (b[1] - a[1]) * k,
+    a[2] + (b[2] - a[2]) * k,
+  ]);
+}
+
+/** Rough perceived lightness, 0..1. Good enough to steer a colour choice. */
+export function lightness(hex) {
+  const [r, g, b] = hexToRgb(hex);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}

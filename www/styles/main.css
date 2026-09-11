@@ -649,11 +649,15 @@ body { position: fixed; inset: 0; }
   left: 50%;
   bottom: calc(var(--safe-b) + var(--u) * 13);
   transform: translateX(-50%);
+  /* Coaching lines are sentences, not labels: let a long one wrap rather than
+     run off both edges of a narrow phone. */
+  width: min(86vw, calc(var(--u) * 92));
+  text-align: center;
+  line-height: 1.35;
   font-size: calc(var(--u) * 3.1);
   font-weight: 800;
   letter-spacing: 0.16em;
   color: var(--ink-dim);
-  white-space: nowrap;
   opacity: 0;
   transition: opacity 300ms ease;
   pointer-events: none;

@@ -12,10 +12,12 @@ import { World } from './world.js';
 import {
   TUNE, ZONES, SKINS, OVERDRIVE_AT, zoneByIndex, skinById, trailById, POWERUPS,
 } from './config.js';
-import { adjustPalette } from './palette.js';
+import { adjustPalette, skinTones } from './palette.js';
 import { SHIELD } from './config.js';
 
 const STAR_COUNT = 130;
+/** Half-width of the PERFECT window, as a fraction of a gap's half-width. */
+const PERFECT_BAND = 1 - TUNE.perfectThreshold;
 const TRAIL_LEN = 26;
 
 function hexToRgb(hex) {
@@ -58,7 +60,7 @@ export class Renderer {
     this._moteBuckets = Array.from({ length: 6 }, () => []);
     this._gapScratch = Array.from({ length: 8 }, () => ({ c: 0, half: 0 }));
     this._haloCache = new Map();
-    this._shadeCache = new Map();
+    this._toneCache = new Map();
     this.trail = [];
     this._skyGradient = null;
     this._skyKey = '';
@@ -103,7 +105,6 @@ export class Renderer {
     this._vignette = null;
     this._vignetteDark = -1;
     this._haloCache.clear();
-    this._shadeCache.clear();
     this._buildStars();
   }
 
@@ -562,8 +563,60 @@ export class Renderer {
         ctx.stroke();
       }
 
+      this._drawPerfectBands(ctx, ring, radius, thick, rot, alpha);
       this._drawOrbs(ctx, ring, radius, alpha, world);
     }
+  }
+
+  /**
+   * The PERFECT window, drawn inside the gap it belongs to.
+   *
+   * PERFECT is the only rule in the game a player cannot deduce from watching
+   * the screen, so it is drawn: a bar across the middle of each opening and a
+   * tick at dead centre. Pass inside the bar and the ring scores PERFECT. The
+   * marks fade in as the ring closes so the far field stays clean, and they sit
+   * in empty space, so they never hide a wall or an orb.
+   */
+  _drawPerfectBands(ctx, ring, radius, thick, rot, alpha) {
+    // Only while the ring is still coming at you and still live. Once it is
+    // behind you or broken, the question is answered and a mark you can no
+    // longer act on is just clutter.
+    if (ring.state !== 'live' && ring.state !== 'crossing') return;
+    if (ring.travel < TUNE.playerOrbit * 0.92) return;
+    const near = clamp((1.02 - ring.travel) / 0.42, 0, 1);
+    if (near <= 0.02) return;
+    const gaps = this._gapScratch;
+    const a = alpha * near;
+
+    // A filled window across the opening, with a bright line down its middle.
+    // A filled area reads as "aim here" at a glance where three loose ticks read
+    // as debris, and it needs no colour of its own — it lives in empty space, so
+    // white at low alpha cannot be mistaken for a wall or an orb.
+    const inner = radius - thick * 1.5;
+    const outer = radius + thick * 1.5;
+
+    ctx.lineCap = 'butt';
+    for (let g = 0; g < ring.gaps.length; g++) {
+      const band = gaps[g].half * PERFECT_BAND;
+      const c = rot + gaps[g].c;
+
+      ctx.fillStyle = rgba([255, 255, 255], a * 0.16);
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, outer, c - band, c + band);
+      ctx.arc(this.cx, this.cy, inner, c + band, c - band, true);
+      ctx.closePath();
+      ctx.fill();
+
+      const cos = Math.cos(c);
+      const sin = Math.sin(c);
+      ctx.strokeStyle = rgba([255, 255, 255], a);
+      ctx.lineWidth = Math.max(1.2, thick * 0.32);
+      ctx.beginPath();
+      ctx.moveTo(this.cx + cos * inner, this.cy + sin * inner);
+      ctx.lineTo(this.cx + cos * outer, this.cy + sin * outer);
+      ctx.stroke();
+    }
+    ctx.lineCap = 'round';
   }
 
   _drawOrbs(ctx, ring, radius, alpha, world) {
@@ -637,29 +690,14 @@ export class Renderer {
     return halo;
   }
 
-  /**
-   * The player's body is lit like a sphere rather than filled flat, which is
-   * most of what stops it reading as a sticker. The gradient is built in local
-   * coordinates around the origin, so one per skin serves every frame however
-   * the canvas is rotated or scaled underneath it.
-   *
-   * Local +y points at the core, which is the only light in the scene — so the
-   * bright side of the ball always faces the star it is orbiting, and turns
-   * with it as the player swings around.
-   */
-  _bodyShade(ctx, skin, r) {
-    const key = `${skin.id}|${Math.round(r)}`;
-    let shade = this._shadeCache.get(key);
-    if (!shade) {
-      shade = ctx.createRadialGradient(-r * 0.16, r * 0.34, r * 0.05, 0, 0, r * 1.18);
-      shade.addColorStop(0, '#ffffff');
-      shade.addColorStop(0.24, skin.glow);
-      shade.addColorStop(0.74, skin.glow);
-      shade.addColorStop(1, skin.trail || skin.glow);
-      if (this._shadeCache.size > 16) this._shadeCache.clear();
-      this._shadeCache.set(key, shade);
+  /** `skinTones` is pure and cheap, but it is per-frame work for no reason. */
+  _skinTones(skin) {
+    let tones = this._toneCache.get(skin.id);
+    if (!tones) {
+      tones = skinTones(skin);
+      this._toneCache.set(skin.id, tones);
     }
-    return shade;
+    return tones;
   }
 
   _drawPlayer(ctx, world, skin, trail) {
@@ -740,42 +778,56 @@ export class Renderer {
     // the light comes from and where the highlight has to sit.
     ctx.scale(pop, 1 / pop);
 
-    // A dark rim keeps the body from dissolving into a bright ring behind it.
-    // Each skin carries its own, tuned to sit under its glow rather than
-    // looking like a black sticker.
+    // A cartoon ball, not a rendered sphere: flat colour, one bold ink line,
+    // one clean shine. At fifteen pixels across, solid shapes read and soft
+    // shading does not — and the ink is also what stops the body dissolving
+    // into a bright ring passing behind it.
+    //
+    // The ink is stroked on the collision circle and the fill covers its inner
+    // half, so the colour ends exactly where the hitbox ends and the line sits
+    // outside it. Every skin is the same circle for the same reason: drawing
+    // one larger than another would be a lie about where the walls are.
+    const tones = this._skinTones(skin);
+
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = skin.rim || '#04070e';
-    ctx.lineWidth = Math.max(1.5, r * 0.26);
+    ctx.strokeStyle = tones.ink;
+    ctx.lineWidth = Math.max(2, r * 0.30);
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, TAU);
     ctx.stroke();
 
-    // Every skin is the same sphere, because the sphere is the collision body
-    // and drawing one skin larger than another would be a lie about where the
-    // walls are. Identity lives in the shading, the mark and the rim instead.
-    ctx.fillStyle = this._bodyShade(ctx, skin, r);
+    ctx.fillStyle = skin.glow;
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, TAU);
     ctx.fill();
 
-    // The skin's mark, held well inside the sphere.
-    ctx.globalAlpha = 0.94;
+    // A darker crescent along the edge facing away from the core. Two flat
+    // tones instead of a gradient: it is the cheapest thing that says "ball"
+    // rather than "disc", and it works on a white body as well as a dark one.
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = tones.shade;
+    ctx.beginPath();
+    ctx.arc(r * 0.24, -r * 0.97, r * 1.2, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // The skin's mark: flat, centred, inked like everything else. The ink is
+    // what makes a white mark readable on a white body, so a skin is never
+    // reduced to a plain disc. `tests/content.test.mjs` holds the rule.
+    ctx.strokeStyle = tones.ink;
+    ctx.lineWidth = Math.max(1, r * 0.10);
+    this._shapePath(ctx, skin.shape, r * 0.40);
+    ctx.stroke();
     ctx.fillStyle = skin.core;
-    this._shapePath(ctx, skin.shape, r * 0.42);
+    this._shapePath(ctx, skin.shape, r * 0.40);
     ctx.fill();
-    ctx.globalAlpha = 0.55;
-    ctx.strokeStyle = skin.rim || '#04070e';
-    ctx.lineWidth = Math.max(1, r * 0.08);
-    this._shapePath(ctx, skin.shape, r * 0.42);
-    ctx.stroke();
 
-    // A specular pip, sitting outside the mark rather than merging with it:
-    // the highlight that turns a flat disc into an object catching the light of
-    // the star it is orbiting.
-    ctx.globalAlpha = 0.9;
+    // One shine, out near the ink on the lit side.
+    ctx.globalAlpha = 0.92;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(-r * 0.14, r * 0.60, r * 0.16, 0, TAU);
+    ctx.arc(-r * 0.30, r * 0.66, r * 0.13, 0, TAU);
     ctx.fill();
     ctx.restore();
 
@@ -969,6 +1021,17 @@ export class Renderer {
     ctx.fillStyle = this._vignette;
     ctx.fillRect(0, 0, this.w, this.h);
     ctx.restore();
+  }
+
+  /**
+   * An orbit point pulled back inside the canvas, so a label centred on it is
+   * not half off the screen when the player happens to be at the left or right
+   * extreme of their orbit.
+   */
+  labelPoint(angle, radiusUnits, text, size) {
+    const p = this.orbitPoint(angle, radiusUnits);
+    const pad = Math.min(text.length * size * 0.30, this.w * 0.45);
+    return { x: clamp(p.x, pad, this.w - pad), y: clamp(p.y, size, this.h - size) };
   }
 
   /** Screen position of a point on the player's orbit — used to place FX. */

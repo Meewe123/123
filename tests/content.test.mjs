@@ -9,6 +9,7 @@ import {
   MISSION_TEMPLATES, DAILY_REWARDS, STREAK_MILESTONES, achievementById,
 } from '../www/src/game/config.js';
 import { EFFECT_IDS } from '../www/src/game/effects.js';
+import { skinTones } from '../www/src/game/palette.js';
 import * as store from '../www/src/engine/storage.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -81,6 +82,37 @@ test('every cosmetic is unique, legible and reachable', () => {
 
   assert.equal(SKINS.length, 12, 'twelve skins, as designed');
   assert.ok(TRAILS.length >= 4 && EFFECTS.length >= 4, 'trails and effects are real categories');
+});
+
+test("every skin's mark reads against its own body", () => {
+  // The body is drawn flat, so the mark inside it is what tells two skins apart
+  // at a glance. It reads either because it contrasts with the body itself, or
+  // because the ink line around it contrasts with both. A skin that satisfies
+  // neither is a plain disc on screen, whatever the shop swatch suggests.
+  const channel = (c) => (c / 255 <= 0.04045 ? c / 255 / 12.92 : (((c / 255) + 0.055) / 1.055) ** 2.4);
+  const luminance = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    return 0.2126 * channel((n >> 16) & 255) + 0.7152 * channel((n >> 8) & 255) + 0.0722 * channel(n & 255);
+  };
+  const contrast = (a, b) => {
+    const [x, y] = [luminance(a), luminance(b)];
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  };
+
+  for (const skin of SKINS) {
+    assert.match(skin.rim, HEX, `${skin.id}.rim is not a hex colour`);
+    // Measure the ink the renderer actually draws, not the authored rim it is
+    // derived from — they are not the same colour, and the difference is
+    // exactly where a marginal skin would slip through.
+    const { ink } = skinTones(skin);
+    const markOnBody = contrast(skin.core, skin.glow);
+    const inkOnBody = contrast(ink, skin.glow);
+    const inkOnMark = contrast(ink, skin.core);
+    const readable = markOnBody >= 2.0 || (inkOnBody >= 3.0 && inkOnMark >= 2.5);
+    assert.ok(readable,
+      `${skin.id}: mark/body ${markOnBody.toFixed(2)}, ink/body ${inkOnBody.toFixed(2)},`
+      + ` ink/mark ${inkOnMark.toFixed(2)} — nothing separates the mark from the body`);
+  }
 });
 
 test('every PERFECT effect a zone or cosmetic names actually exists', () => {
@@ -168,6 +200,28 @@ test('an equipped cosmetic the player does not own is reset', () => {
   assert.equal(p.skin, 'flow');
   assert.equal(p.trail, 'comet');
   assert.equal(p.effect, 'zone');
+});
+
+test('the shipped version is the same number everywhere', () => {
+  // Three files carry it and nothing checks them against each other: a build
+  // submitted with a stale MARKETING_VERSION is rejected by App Store Connect
+  // long after the mistake was made.
+  const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'package.json needs a three-part version');
+
+  const html = readFileSync(resolve(ROOT, 'www/index.html'), 'utf8');
+  const shown = html.match(/id="app-version">([^<]+)</);
+  assert.ok(shown, 'the settings screen has no version to show');
+  assert.equal(shown[1].trim(), pkg.version, 'the settings screen shows a different version');
+
+  const pbx = readFileSync(resolve(ROOT, 'ios/App/App.xcodeproj/project.pbxproj'), 'utf8');
+  const marketing = [...pbx.matchAll(/MARKETING_VERSION = ([^;]+);/g)].map((m) => m[1].trim());
+  assert.ok(marketing.length > 0, 'the iOS project has no MARKETING_VERSION');
+  for (const v of marketing) assert.equal(v, pkg.version, 'iOS MARKETING_VERSION has drifted');
+
+  const builds = [...pbx.matchAll(/CURRENT_PROJECT_VERSION = ([^;]+);/g)].map((m) => m[1].trim());
+  assert.ok(builds.length > 0 && new Set(builds).size === 1,
+    `every iOS target needs the same build number, found ${builds.join(', ')}`);
 });
 
 test('the service worker precaches every shipped source file', () => {

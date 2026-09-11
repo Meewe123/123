@@ -194,7 +194,12 @@ export class AudioEngine {
         this._tone(300, { type: 'square', dur: 0.055, gain: 0.12, slideTo: 210 });
         break;
       case 'pass': {
-        const step = PENTA[Math.min(arg, 40) % PENTA.length] + 12 * Math.floor(Math.min(arg, 40) / PENTA.length);
+        // The pass tone climbs with the chain and then holds. Left uncapped it
+        // walked five octaves, and a long chain ended in a whistle nobody wants
+        // in their ear on ring ninety; capping the index rather than the octave
+        // keeps it strictly rising all the way to the ceiling.
+        const idx = Math.max(0, Math.min(arg, PENTA.length * 2));
+        const step = PENTA[idx % PENTA.length] + 12 * Math.floor(idx / PENTA.length);
         this._tone(noteHz(this._root + 12 + step), { type: 'triangle', dur: 0.16, gain: 0.22, send: 0.25 });
         break;
       }
