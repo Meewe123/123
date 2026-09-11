@@ -58,6 +58,7 @@ export class Renderer {
     this._moteBuckets = Array.from({ length: 6 }, () => []);
     this._gapScratch = Array.from({ length: 8 }, () => ({ c: 0, half: 0 }));
     this._haloCache = new Map();
+    this._shadeCache = new Map();
     this.trail = [];
     this._skyGradient = null;
     this._skyKey = '';
@@ -94,12 +95,15 @@ export class Renderer {
     this.h = cssH;
     this.cx = cssW / 2;
     this.cy = cssH / 2;
-    this.unit = Math.min(cssW, cssH) / 2;
+    // viewScale is the whole camera: raise it and the field comes closer,
+    // because every world unit is drawn larger while none of them changes.
+    this.unit = (Math.min(cssW, cssH) / 2) * TUNE.viewScale;
     this._skyGradient = null;
     this._skyKey = '';
     this._vignette = null;
     this._vignetteDark = -1;
     this._haloCache.clear();
+    this._shadeCache.clear();
     this._buildStars();
   }
 
@@ -411,19 +415,22 @@ export class Renderer {
 
   _drawCore(ctx, world) {
     const p = this.pal;
-    const base = this.unit * 0.085;
+    // The core is the star you orbit, not a character. It used to be drawn
+    // larger and brighter than the player, which made the eye read the wrong
+    // object as "me". It is a landmark now: smaller, dimmer, still the anchor.
+    const base = this.unit * 0.052;
     const pulse = 1 + this.corePulse * 0.28 + Math.sin(this.coreSpin * 2.2) * 0.035;
     const r = base * pulse;
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const halo = ctx.createRadialGradient(this.cx, this.cy, r * 0.2, this.cx, this.cy, r * 4.2);
-    halo.addColorStop(0, rgba(p.ring, 0.55));
-    halo.addColorStop(0.35, rgba(p.ring, 0.14));
+    const halo = ctx.createRadialGradient(this.cx, this.cy, r * 0.2, this.cx, this.cy, r * 5.8);
+    halo.addColorStop(0, rgba(p.ring, 0.42));
+    halo.addColorStop(0.35, rgba(p.ring, 0.12));
     halo.addColorStop(1, rgba(p.ring, 0));
     ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.arc(this.cx, this.cy, r * 4.2, 0, TAU);
+    ctx.arc(this.cx, this.cy, r * 5.8, 0, TAU);
     ctx.fill();
     ctx.restore();
 
@@ -431,9 +438,9 @@ export class Renderer {
       this.cx - r * 0.3, this.cy - r * 0.35, r * 0.1,
       this.cx, this.cy, r,
     );
-    body.addColorStop(0, rgba(p.accent, 1));
-    body.addColorStop(0.6, rgba(p.ring, 0.95));
-    body.addColorStop(1, rgba(p.ringDim, 0.9));
+    body.addColorStop(0, rgba(p.accent, 0.9));
+    body.addColorStop(0.6, rgba(p.ring, 0.78));
+    body.addColorStop(1, rgba(p.ringDim, 0.68));
     ctx.fillStyle = body;
     ctx.beginPath();
     ctx.arc(this.cx, this.cy, r, 0, TAU);
@@ -531,8 +538,12 @@ export class Renderer {
         const a1 = rot + to;
 
         if (!this.reduced) {
-          ctx.strokeStyle = rgba(p.ringDim, alpha * 0.42);
-          ctx.lineWidth = thick * 2.5;
+          // The soft casing around each ring. This is what turns a bright line
+          // into a tube with depth, and it is the widest stroke on the frame —
+          // so it is also the one place where a wider ring costs real fill
+          // time. 2.4x is where it still reads as a tube on a phone.
+          ctx.strokeStyle = rgba(p.ringDim, alpha * 0.44);
+          ctx.lineWidth = thick * 2.4;
           ctx.beginPath();
           ctx.arc(this.cx, this.cy, radius, a0, a1);
           ctx.stroke();
@@ -626,22 +637,47 @@ export class Renderer {
     return halo;
   }
 
+  /**
+   * The player's body is lit like a sphere rather than filled flat, which is
+   * most of what stops it reading as a sticker. The gradient is built in local
+   * coordinates around the origin, so one per skin serves every frame however
+   * the canvas is rotated or scaled underneath it.
+   *
+   * Local +y points at the core, which is the only light in the scene — so the
+   * bright side of the ball always faces the star it is orbiting, and turns
+   * with it as the player swings around.
+   */
+  _bodyShade(ctx, skin, r) {
+    const key = `${skin.id}|${Math.round(r)}`;
+    let shade = this._shadeCache.get(key);
+    if (!shade) {
+      shade = ctx.createRadialGradient(-r * 0.16, r * 0.34, r * 0.05, 0, 0, r * 1.18);
+      shade.addColorStop(0, '#ffffff');
+      shade.addColorStop(0.24, skin.glow);
+      shade.addColorStop(0.74, skin.glow);
+      shade.addColorStop(1, skin.trail || skin.glow);
+      if (this._shadeCache.size > 16) this._shadeCache.clear();
+      this._shadeCache.set(key, shade);
+    }
+    return shade;
+  }
+
   _drawPlayer(ctx, world, skin, trail) {
     const u = this.unit;
     const orbit = TUNE.playerOrbit * u;
     const a = world.player.angle;
     const x = this.cx + Math.cos(a) * orbit;
     const y = this.cy + Math.sin(a) * orbit;
-    // The body is drawn at exactly its collision size: wide along the orbit,
-    // narrow across it. What touches a ring is what the simulation tests.
-    const r = TUNE.playerTangential * u;
-    const flatten = TUNE.playerRadial / TUNE.playerTangential;
+    // The body is drawn at exactly its collision size: one circle, the same
+    // radius the simulation sweeps. What touches a ring is what the
+    // simulation tests, on every axis.
+    const r = TUNE.playerRadius * u;
 
     this.trail.push({ x, y });
     while (this.trail.length > TRAIL_LEN) this.trail.shift();
 
     if (!this.reduced && this.trail.length > 2) {
-      this._drawTrail(ctx, trail.style, skin, r * flatten);
+      this._drawTrail(ctx, trail.style, skin, r);
     }
 
     // The arm back to the core makes the player's angle instantly readable.
@@ -655,12 +691,16 @@ export class Renderer {
     ctx.stroke();
     ctx.restore();
 
+    // A flip gives the ball a short elastic pop. The two axes are reciprocal,
+    // so its area never changes and its silhouette never flattens into a disc.
     const sinceFlip = world.time - world.player.flipAt;
-    const squash = 1 + Math.exp(-sinceFlip * 14) * 0.42;
+    const pop = 1 + Math.exp(-sinceFlip * 14) * 0.15;
 
     // The halo grows with the chain: at x1 it is a soft edge, at OVERDRIVE it
     // is the brightest thing on screen that is not a ring.
-    const halo = r * (3.0 + this.heat * 1.6);
+    // Tied to the body radius, but reaching much further than it: the player is
+    // the smallest object on screen and has to be the one your eye lands on.
+    const halo = r * (4.8 + this.heat * 2.5);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const g = ctx.createRadialGradient(x, y, 0, x, y, halo);
@@ -687,7 +727,7 @@ export class Renderer {
       for (let i = 0; i < 2; i++) {
         const spin = this.clock * (i ? -3.4 : 4.2) + i * Math.PI;
         ctx.beginPath();
-        ctx.arc(0, 0, r * (2.0 + i * 0.5), spin, spin + 1.5);
+        ctx.arc(0, 0, r * (3.0 + i * 0.75), spin, spin + 1.5);
         ctx.stroke();
       }
       ctx.restore();
@@ -696,31 +736,46 @@ export class Renderer {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(a + Math.PI / 2);
-    // Local x runs along the orbit, local y across it.
-    ctx.scale(squash, flatten * (2 - squash));
+    // Local x runs along the orbit; local +y points at the core, which is where
+    // the light comes from and where the highlight has to sit.
+    ctx.scale(pop, 1 / pop);
 
     // A dark rim keeps the body from dissolving into a bright ring behind it.
     // Each skin carries its own, tuned to sit under its glow rather than
     // looking like a black sticker.
     ctx.lineJoin = 'round';
     ctx.strokeStyle = skin.rim || '#04070e';
-    ctx.lineWidth = Math.max(1.5, r * 0.30);
-    this._shapePath(ctx, skin.shape, r);
+    ctx.lineWidth = Math.max(1.5, r * 0.26);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
     ctx.stroke();
 
-    ctx.fillStyle = skin.glow;
-    this._shapePath(ctx, skin.shape, r);
-    ctx.fill();
-    ctx.fillStyle = skin.core;
-    this._shapePath(ctx, skin.shape, r * 0.58);
+    // Every skin is the same sphere, because the sphere is the collision body
+    // and drawing one skin larger than another would be a lie about where the
+    // walls are. Identity lives in the shading, the mark and the rim instead.
+    ctx.fillStyle = this._bodyShade(ctx, skin, r);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
     ctx.fill();
 
-    // A specular pip: two pixels of white that turn a flat shape into an
-    // object catching the light of the star it is orbiting.
-    ctx.globalAlpha = 0.75;
+    // The skin's mark, held well inside the sphere.
+    ctx.globalAlpha = 0.94;
+    ctx.fillStyle = skin.core;
+    this._shapePath(ctx, skin.shape, r * 0.42);
+    ctx.fill();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = skin.rim || '#04070e';
+    ctx.lineWidth = Math.max(1, r * 0.08);
+    this._shapePath(ctx, skin.shape, r * 0.42);
+    ctx.stroke();
+
+    // A specular pip, sitting outside the mark rather than merging with it:
+    // the highlight that turns a flat disc into an object catching the light of
+    // the star it is orbiting.
+    ctx.globalAlpha = 0.9;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(-r * 0.30, -r * 0.28, r * 0.17, 0, TAU);
+    ctx.arc(-r * 0.14, r * 0.60, r * 0.16, 0, TAU);
     ctx.fill();
     ctx.restore();
 
@@ -737,10 +792,9 @@ export class Renderer {
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(a + Math.PI / 2);
-      ctx.scale(1, Math.max(flatten, 0.64));
 
       for (let i = Math.max(1, charges) - 1; i >= 0; i--) {
-        const rr = r * (1.62 + i * 0.44);
+        const rr = r * (1.95 + i * 0.62);
         const outer = i > 0;
         const alpha = breathe * (outer ? 0.5 : 1);
 

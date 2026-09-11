@@ -53,11 +53,11 @@ export const EVT = {
 const SPARE_POWERS = ['slow', 'double'];
 
 /** Half the radial span over which a ring is in contact with the player. */
-export const BAND_HALF = TUNE.playerRadial + TUNE.ringThickness / 2;
+export const BAND_HALF = TUNE.playerRadius + TUNE.ringThickness / 2;
 /** The player's half-width along its own orbit, in radians. */
-export const PLAYER_HALF = TUNE.playerTangential / TUNE.playerOrbit;
+export const PLAYER_HALF = TUNE.playerRadius / TUNE.playerOrbit;
 /** How close an orb has to pass to be collected, in radians. */
-const ORB_TOLERANCE = (TUNE.playerTangential + TUNE.orbRadius) / TUNE.playerOrbit;
+const ORB_TOLERANCE = (TUNE.playerRadius + TUNE.orbRadius) / TUNE.playerOrbit;
 
 /**
  * Collision is sampled at a fixed resolution in *travel*, never per frame, so

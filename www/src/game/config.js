@@ -8,18 +8,28 @@
  */
 
 export const TUNE = {
+  // How much of the playfield the camera shows. 1.0 fits a radius of 1.0
+  // across the shorter screen side; above that the view pulls in and
+  // everything — rings, player, orbs — grows together, because only the
+  // drawing scale changes and never a world unit.
+  //
+  // The ceiling is a gameplay rule, not taste: the ring you must clear next
+  // sits at `playerOrbit + baseSpacing`, and it has to be fully on screen the
+  // moment you clear the current one, so `viewScale <= 1 / (playerOrbit +
+  // baseSpacing)`. `tests/world.test.mjs` holds us to it.
+  viewScale: 1.12,
   playerOrbit: 0.44,
-  // The player is a lens, not a ball: narrow across the ring it is crossing,
-  // wide along its own orbit. The radial half-extent sets how long a ring
-  // touches the player, which is what the collision test has to survive — and
-  // it is also what makes the player visible, so both matter.
-  playerRadial: 0.030,
-  playerTangential: 0.050,
+  // The player is a ball. One radius, so what the collision test sweeps is a
+  // circle and what you see is that same circle — no axis is secretly kinder
+  // than the other. It sets two things at once: how long a ring touches the
+  // player (radius + half the ring's thickness) and how wide the player is
+  // along its own orbit (radius / orbit), which is the floor under every gap.
+  playerRadius: 0.034,
   spawnRadius: 1.30,
   despawnRadius: 0.05,
   playerAngularSpeed: 2.35,
   ringSpeed: 0.48,
-  ringThickness: 0.018,
+  ringThickness: 0.024,
   orbRadius: 0.026,
   baseSpacing: 0.42,
   minSpacing: 0.38,

@@ -54,17 +54,34 @@ export function drawShareCard(result, palette, skin) {
   ctx.arc(px, py, 120, 0, TAU);
   ctx.fill();
   ctx.globalAlpha = 1;
+  // The same sphere the game draws: round, lit from one side, with the skin's
+  // mark inside it and the highlight clear of that mark.
   ctx.save();
   ctx.translate(px, py);
-  ctx.scale(1, 0.6);
-  ctx.fillStyle = skin.glow;
+  const body = ctx.createRadialGradient(-12, -12, 2, 0, 0, 40);
+  body.addColorStop(0, '#ffffff');
+  body.addColorStop(0.24, skin.glow);
+  body.addColorStop(0.74, skin.glow);
+  body.addColorStop(1, skin.trail || skin.glow);
+  ctx.strokeStyle = skin.rim || '#04070e';
+  ctx.lineWidth = 9;
+  ctx.beginPath();
+  ctx.arc(0, 0, 34, 0, TAU);
+  ctx.stroke();
+  ctx.fillStyle = body;
   ctx.beginPath();
   ctx.arc(0, 0, 34, 0, TAU);
   ctx.fill();
   ctx.fillStyle = skin.core;
   ctx.beginPath();
-  ctx.arc(0, 0, 18, 0, TAU);
+  ctx.arc(0, 0, 16, 0, TAU);
   ctx.fill();
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(-19, -19, 6.5, 0, TAU);
+  ctx.fill();
+  ctx.globalAlpha = 1;
   ctx.restore();
 
   // Wordmark

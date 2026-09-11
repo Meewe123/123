@@ -356,3 +356,27 @@ test('no ring is narrower than the player can sweep through', () => {
     assert.ok(seen.size > 40, `only inspected ${seen.size} rings`);
   }
 });
+
+test('the player is a ball: both collision extents come from one radius', () => {
+  // The drawn body and the swept body are the same circle. If anyone re-splits
+  // the player into a lens, one axis becomes secretly kinder than the other and
+  // "I went through the wall" comes back.
+  const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-12, `${a} != ${b}`);
+  close(BAND_HALF - TUNE.ringThickness / 2, TUNE.playerRadius);
+  close(PLAYER_HALF * TUNE.playerOrbit, TUNE.playerRadius);
+});
+
+test('the ring you must clear next is already fully on screen', () => {
+  // The camera shows a radius of 1 / viewScale across the shorter screen side.
+  // The moment you clear a ring, the next one sits at playerOrbit + spacing —
+  // and it has to be visible all the way round, because its gap can be at any
+  // angle, including the one the screen would clip. The 2% on top is because a
+  // ring sitting exactly on the screen edge is only as visible as its own
+  // anti-aliasing, which is not visible enough to aim at.
+  const visible = 1 / TUNE.viewScale;
+  for (const spacing of [TUNE.baseSpacing, TUNE.minSpacing]) {
+    const next = TUNE.playerOrbit + spacing;
+    assert.ok(next * 1.02 <= visible,
+      `next ring at ${next.toFixed(3)} is outside the visible radius ${visible.toFixed(3)}`);
+  }
+});
