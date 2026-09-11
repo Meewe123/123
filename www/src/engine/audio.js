@@ -9,6 +9,9 @@ const PENTA = [0, 3, 5, 7, 10];
 
 const noteHz = (semitone) => 440 * Math.pow(2, (semitone - 9) / 12);
 
+/** A few samples of silence, 8 kHz 8-bit mono. See `_iosSession`. */
+const SILENT_CLIP = 'data:audio/wav;base64,UklGRiwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQgAAACAgICAgICAgA==';
+
 /**
  * One timbre per zone. Same synth graph throughout — only the oscillator
  * shapes, filter and layer balance move, so a zone can sound completely
@@ -41,15 +44,42 @@ export class AudioEngine {
     this._voice = VOICES.calm;
   }
 
-  /** Must be called from inside a user gesture (iOS unlocks audio that way). */
+  /** True once sound is actually coming out, not merely set up. */
+  get running() {
+    return !!this.ctx && this.ctx.state === 'running';
+  }
+
+  /** Set up, but refused by the browser or the device — retry on a gesture. */
+  get blocked() {
+    return !!this.ctx && this.ctx.state !== 'running';
+  }
+
+  /**
+   * Start or restart audio. Must be called from inside a user gesture, and may
+   * be called on every gesture: browsers refuse for reasons a page cannot see
+   * (an iframe without the autoplay permission, a tab the user muted, a gesture
+   * that did not count), and a refusal has to be retried rather than remembered
+   * as success. Nothing here is expensive once the context is running.
+   */
   unlock() {
-    if (this.ready) {
-      if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx) {
+      this._iosSession();
+      if (this.ctx.state !== 'running') {
+        const resumed = this.ctx.resume();
+        if (resumed && resumed.catch) resumed.catch(() => {});
+      }
+      this._startScheduler();
+      this.applyMusicVolume();
       return;
     }
     const Ctor = window.AudioContext || window.webkitAudioContext;
     if (!Ctor) return;
-    const ctx = new Ctor();
+    let ctx;
+    try {
+      ctx = new Ctor();
+    } catch {
+      return; // no audio on this device; the game is still entirely playable
+    }
     this.ctx = ctx;
 
     this.master = ctx.createGain();
@@ -90,9 +120,38 @@ export class AudioEngine {
     this._noiseBuffer = buf;
 
     this.ready = true;
-    if (ctx.state === 'suspended') ctx.resume();
+    this._iosSession();
+    if (ctx.state !== 'running') {
+      const resumed = ctx.resume();
+      if (resumed && resumed.catch) resumed.catch(() => {});
+    }
     this._startScheduler();
     this.applyMusicVolume();
+  }
+
+  /**
+   * iOS routes WebAudio through the "ambient" audio session, which the hardware
+   * ring/silent switch mutes — the single most common reason a web game is
+   * silent on an iPhone that is working perfectly otherwise. Playing one short
+   * clip through an HTMLAudioElement inside the gesture moves the page to the
+   * playback session, and WebAudio follows it. Harmless everywhere else.
+   */
+  _iosSession() {
+    try {
+      if (!this._silent) {
+        const el = document.createElement('audio');
+        el.setAttribute('playsinline', '');
+        el.preload = 'auto';
+        el.volume = 0.001;
+        el.src = SILENT_CLIP;
+        this._silent = el;
+      }
+      this._silent.currentTime = 0;
+      const played = this._silent.play();
+      if (played && played.catch) played.catch(() => {});
+    } catch {
+      /* media may be blocked outright; WebAudio can still work on its own */
+    }
   }
 
   setSfx(on) {

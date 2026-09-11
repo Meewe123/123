@@ -311,23 +311,30 @@ export const effectById = (id) => EFFECTS.find((e) => e.id === id) || EFFECTS[0]
 // ---------------------------------------------------------- achievements ---
 
 /**
- * Twelve, no more. Each is checked against the lifetime profile after a run,
- * so they are deterministic and cannot be triggered from the UI.
+ * Twelve, no more. Every one is a metric against a target, declared rather than
+ * hand-written as a predicate: that is what lets the home screen show how close
+ * the nearest one is instead of listing twelve things the player has not done.
  */
 export const ACHIEVEMENTS = [
-  { id: 'first_perfect', name: 'Dead Centre', desc: 'Land your first PERFECT', reward: 50, test: (p) => p.totalPerfects >= 1 },
-  { id: 'perfect_10', name: 'Precision', desc: 'Land 10 PERFECTs', reward: 100, test: (p) => p.totalPerfects >= 10 },
-  { id: 'perfect_100', name: 'Surgeon', desc: 'Land 100 PERFECTs', reward: 400, test: (p) => p.totalPerfects >= 100 },
-  { id: 'zone_3', name: 'Into the Fire', desc: 'Reach Zone 3', reward: 80, test: (p) => p.bestZone >= 2 },
-  { id: 'zone_5', name: 'Unstable', desc: 'Reach Zone 5', reward: 150, test: (p) => p.bestZone >= 4 },
-  { id: 'zone_8', name: 'The Void', desc: 'Reach Zone 8', reward: 500, test: (p) => p.bestZone >= 7 },
-  { id: 'mult_5', name: 'Momentum', desc: 'Reach a x5 multiplier', reward: 120, test: (p) => p.bestMultiplier >= 5 },
-  { id: 'mult_8', name: 'Overdrive', desc: 'Reach x8 — full OVERDRIVE', reward: 400, test: (p) => p.bestMultiplier >= 8 },
-  { id: 'orbs_100', name: 'Collector', desc: 'Collect 100 orbs', reward: 150, test: (p) => p.totalOrbs >= 100 },
-  { id: 'greed_50', name: 'No Guts', desc: 'Take 50 greed orbs', reward: 250, test: (p) => p.totalGreedOrbs >= 50 },
-  { id: 'no_shield', name: 'Bare Handed', desc: 'Reach Zone 3 without taking a shield', reward: 200, test: (p) => p.noShieldZone >= 2 },
-  { id: 'daily_done', name: 'Regular', desc: 'Finish a Daily Run', reward: 100, test: (p) => p.dailyRuns >= 1 },
-];
+  { id: 'first_perfect', name: 'Dead Centre', desc: 'Land your first PERFECT', reward: 50, at: (p) => p.totalPerfects, goal: 1 },
+  { id: 'perfect_10', name: 'Precision', desc: 'Land 10 PERFECTs', reward: 100, at: (p) => p.totalPerfects, goal: 10 },
+  { id: 'perfect_100', name: 'Surgeon', desc: 'Land 100 PERFECTs', reward: 400, at: (p) => p.totalPerfects, goal: 100 },
+  { id: 'zone_3', name: 'Into the Fire', desc: 'Reach Zone 3', reward: 80, at: (p) => p.bestZone + 1, goal: 3 },
+  { id: 'zone_5', name: 'Unstable', desc: 'Reach Zone 5', reward: 150, at: (p) => p.bestZone + 1, goal: 5 },
+  { id: 'zone_8', name: 'The Void', desc: 'Reach Zone 8', reward: 500, at: (p) => p.bestZone + 1, goal: 8 },
+  { id: 'mult_5', name: 'Momentum', desc: 'Reach a x5 multiplier', reward: 120, at: (p) => p.bestMultiplier, goal: 5 },
+  { id: 'mult_8', name: 'Overdrive', desc: 'Reach x8 — full OVERDRIVE', reward: 400, at: (p) => p.bestMultiplier, goal: 8 },
+  { id: 'orbs_100', name: 'Collector', desc: 'Collect 100 orbs', reward: 150, at: (p) => p.totalOrbs, goal: 100 },
+  { id: 'greed_50', name: 'No Guts', desc: 'Take 50 greed orbs', reward: 250, at: (p) => p.totalGreedOrbs, goal: 50 },
+  { id: 'no_shield', name: 'Bare Handed', desc: 'Reach Zone 3 without taking a shield', reward: 200, at: (p) => p.noShieldZone + 1, goal: 3 },
+  { id: 'daily_done', name: 'Regular', desc: 'Finish a Daily Run', reward: 100, at: (p) => p.dailyRuns, goal: 1 },
+].map((a) => ({ ...a, test: (p) => achievementAt(a, p) >= a.goal }));
+
+/** How far a profile has come toward one achievement, clamped to its target. */
+export function achievementAt(achievement, profile) {
+  const raw = achievement.at(profile);
+  return Number.isFinite(raw) ? Math.max(0, Math.min(raw, achievement.goal)) : 0;
+}
 
 export const achievementById = (id) => ACHIEVEMENTS.find((a) => a.id === id);
 

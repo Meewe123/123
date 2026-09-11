@@ -348,6 +348,10 @@ body { position: fixed; inset: 0; }
 }
 .badge[hidden] { display: none; }
 
+/* `hidden` is a UA rule with no specificity, so any class that sets `display`
+   silently beats it. Every element the game hides this way needs its own. */
+.pill[hidden], .row[hidden] { display: none; }
+
 /* --------------------------------------------------------------- panel -- */
 
 .panel {
@@ -847,3 +851,48 @@ body { position: fixed; inset: 0; }
 
 .streak-next { font-size: calc(var(--u) * 2.6); font-weight: 700; color: var(--ink-dim); text-align: right; line-height: 1.4; max-width: 55%; }
 .streak-next b { color: var(--gold); }
+
+
+/* ------------------------------------------------------------ practice --- */
+
+/* Says what is different about this run, for as long as the run lasts. A mode
+   the player can forget they are in is a mode that costs them a record. */
+#practice-badge {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-b) + var(--u) * 19);
+  transform: translateX(-50%);
+  width: min(88vw, calc(var(--u) * 96));
+  text-align: center;
+  padding: calc(var(--u) * 1) calc(var(--u) * 2.4);
+  border-radius: 999px;
+  background: rgba(6, 10, 20, 0.5);
+  border: 1px solid var(--panel-line);
+  font-size: calc(var(--u) * 2.5);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--ink-dim);
+  line-height: 1.4;
+}
+#practice-badge[hidden] { display: none; }
+
+/* ----------------------------------------------------------- next goal --- */
+
+/* One reason to press play, chosen for you. */
+.next-goal {
+  width: min(86vw, calc(var(--u) * 74));
+  padding: calc(var(--u) * 2.2) calc(var(--u) * 3);
+  border-radius: calc(var(--u) * 3.4);
+  /* Opaque enough to read over the attract-mode run playing behind it. */
+  background: rgba(6, 10, 20, 0.62);
+  border: 1px solid var(--panel-line);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  text-align: center;
+}
+.next-goal[hidden] { display: none; }
+.next-goal .ng-label { font-size: calc(var(--u) * 2.2); font-weight: 800; letter-spacing: 0.3em; color: var(--ink-faint); }
+.next-goal .ng-name { font-size: calc(var(--u) * 3.4); font-weight: 900; margin: calc(var(--u) * 0.8) 0 calc(var(--u) * 1.4); }
+.next-goal .ng-bar { height: calc(var(--u) * 1.2); border-radius: 999px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+.next-goal .ng-bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--ring), var(--gold)); transition: width 420ms cubic-bezier(0.2, 1, 0.3, 1); }
+.next-goal .ng-meta { margin-top: calc(var(--u) * 1); font-size: calc(var(--u) * 2.4); font-weight: 700; color: var(--ink-faint); font-variant-numeric: tabular-nums; }

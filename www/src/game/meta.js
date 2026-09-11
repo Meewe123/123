@@ -10,6 +10,7 @@ import { RNG, hashString } from '../engine/rng.js';
 import { todayKey, daysBetween } from '../engine/util.js';
 import {
   MISSION_TEMPLATES, DAILY_REWARDS, STREAK_MILESTONES, COSMETIC_KINDS,
+  ACHIEVEMENTS, achievementAt,
 } from './config.js';
 import { isUnlocked } from './achievements.js';
 
@@ -289,4 +290,49 @@ export function commitRun(profile, run) {
   if (run.perfects > profile.bestPerfects) profile.bestPerfects = run.perfects;
   if (run.noShieldZone > profile.noShieldZone) profile.noShieldZone = run.noShieldZone;
   return isBest;
+}
+
+
+/**
+ * The single nearest thing left to earn, for the home screen.
+ *
+ * An unearned achievement always wins over a price tag, because it names
+ * something to *do* — "land ten PERFECTs" — where a cosmetic only names a
+ * number to reach. Ties go to the smaller target, so a fresh profile is pointed
+ * at its first PERFECT rather than at a hundred of them. Once every achievement
+ * is earned, the cheapest cosmetic still missing takes over.
+ */
+export function nextGoal(profile) {
+  let best = null;
+  for (const a of ACHIEVEMENTS) {
+    if (isUnlocked(profile, a.id)) continue;
+    const at = achievementAt(a, profile);
+    const share = at / a.goal;
+    const better = !best
+      || share > best.share
+      || (share === best.share && a.goal < best.goal);
+    if (better) {
+      best = { kind: 'achievement', name: a.name, desc: a.desc, at, goal: a.goal, reward: a.reward, share };
+    }
+  }
+  if (best) return best;
+
+  let cheapest = null;
+  for (const kind of COSMETIC_KINDS) {
+    for (const item of kind.items) {
+      if (item.unlock !== 'shards' || owns(profile, kind.id, item.id)) continue;
+      if (!cheapest || item.cost < cheapest.cost) cheapest = item;
+    }
+  }
+  if (!cheapest) return null;
+  const at = Math.min(profile.shards, cheapest.cost);
+  return {
+    kind: 'cosmetic',
+    name: cheapest.name,
+    desc: 'Waiting for you in the shop',
+    at,
+    goal: cheapest.cost,
+    reward: 0,
+    share: at / cheapest.cost,
+  };
 }

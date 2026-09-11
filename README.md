@@ -26,7 +26,7 @@ That is the entire control scheme.
 | **The game** | `www/` — a zero-dependency ES-module web app. No engine, no framework, no bundler. |
 | **The native app** | `ios/` — a real Xcode project (Capacitor 8, Swift Package Manager, no CocoaPods). |
 | **The art** | `tools/make_icons.py` — every icon and the launch image are generated from code. |
-| **The tests** | `tests/` — 67 head-less simulation/meta tests, a 52-check browser end-to-end run, and an 11-check run of the single-file build. |
+| **The tests** | `tests/` — 79 head-less simulation/meta tests, a 66-check browser end-to-end run, and an 11-check run of the single-file build. |
 | **The listing** | `store/` — description, keywords, privacy policy, App Privacy answers, review notes, and generated screenshots. |
 
 No ads, no analytics, no in-app purchases, no accounts, no network calls. The
@@ -71,6 +71,25 @@ The game is the choice inside that:
   orb is always reachable, so precision never excuses leaving one. At x8 the run
   enters **OVERDRIVE** — the halo, the trail, the music and the PERFECTs all
   step up. It is a state, not a power-up: nothing gets easier.
+
+### Learning it, and playing it your way
+
+* **PRACTICE.** A run where a hit costs the chain instead of the run. Same
+  generator, same collision, same rings — a practice mode that plays differently
+  teaches the wrong timing. It banks nothing: no score, no shards, no missions,
+  no streak, and it says so on screen for as long as it lasts.
+* **One goal at a time.** The home screen names the nearest thing left to earn
+  and how close it is. An achievement that names an action always beats a price
+  tag; when they are all earned, the cheapest cosmetic still missing takes over.
+* **Shape before colour.** Every pickup has its own silhouette — a shard is a
+  disc, a shield a hexagon, slow-mo a square, double-score a diamond — so the
+  four are told apart with no colour vision at all. *Colour-safe pickups* adds a
+  hard dark edge to each one for where hues collapse into the ring behind them.
+* **Sound that can be recovered.** Browsers refuse audio for reasons a page
+  cannot see, so the game retries on every gesture instead of remembering a
+  refusal as success, nudges iOS out of the ambient audio session the ring
+  switch mutes, and when it is genuinely blocked it says so in Settings with a
+  button to try again.
 
 The shield owns one colour, a saturated blue, and nothing else in the game is
 allowed near it — every skin is kept at least 40° of hue away, and orbs are

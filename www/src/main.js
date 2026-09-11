@@ -61,7 +61,8 @@ class Game {
     this.deathTimer = 0;
     this.runCommitted = null;
     this.pendingResult = null;
-    this.audioUnlocked = false;
+    this._audioTries = 0;
+    this._audioWarned = false;
 
     this.ui = new UI(this._handlers());
     this.ui.setProfile(this.profile);
@@ -111,6 +112,7 @@ class Game {
     return {
       onPlay: () => this.startRun({ mode: 'endless' }),
       onDaily: () => this.startRun({ mode: 'daily' }),
+      onPractice: () => this.startRun({ mode: 'practice' }),
       onPause: () => this.pause(),
       onResume: () => this.resume(),
       onRestart: () => this.startRun({ mode: this.runMode }),
@@ -131,12 +133,18 @@ class Game {
       },
       claimableCount: () => meta.claimableCount(this.profile),
       hasShopNews: () => !!meta.nextUnlockable(this.profile),
+      nextGoal: () => meta.nextGoal(this.profile),
       dailyAvailable: () => daily.dailyAvailable(this.profile),
       dailyInfo: () => ({
         label: daily.dailyLabel(todayKey()),
         date: new Date().toDateString().toUpperCase(),
       }),
       purchasesAvailable: () => this.purchases.available,
+      audioBlocked: () => this.audio.blocked || (!this.audio.running && this._audioTries > 0),
+      onAudioRetry: () => {
+        this._unlockAudio();
+        setTimeout(() => this.ui.refreshSettings(), 400);
+      },
       dailyBoardLabel: () => this.dailyBoard.label,
       dailyBoard: () => this.dailyBoard.top(5),
     };
@@ -151,6 +159,10 @@ class Game {
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', onResize);
+
+    // Any gesture anywhere is a chance to start audio, including taps that land
+    // on menu chrome rather than the playfield.
+    document.addEventListener('pointerdown', () => this._unlockAudio(), { capture: true });
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
@@ -180,12 +192,25 @@ class Game {
     globalThis.Capacitor?.Plugins?.SplashScreen?.hide({ fadeOutDuration: 260 }).catch(() => {});
   }
 
+  /**
+   * Sound needs a user gesture, and a browser can refuse one without saying so:
+   * an iframe without the autoplay permission, a muted tab, an iPhone with the
+   * ring switch off. So this runs on every gesture until the context is really
+   * running, rather than once. Remembering a refusal as success is silence for
+   * the whole session — which is exactly what used to happen here.
+   */
   _unlockAudio() {
-    if (this.audioUnlocked) return;
-    this.audioUnlocked = true;
+    if (this.audio.running) return;
     this.audio.unlock();
     this.audio.setSfx(this.profile.sfx);
     this.audio.setMusic(this.profile.music);
+    this._audioTries += 1;
+    // A browser that is going to allow audio allows it on the first gesture.
+    // Past that, say so rather than leaving the player wondering.
+    if (this._audioTries >= 3 && this.audio.blocked && !this._audioWarned) {
+      this._audioWarned = true;
+      this.ui.toast('SOUND IS BLOCKED — SEE SETTINGS', 2600);
+    }
   }
 
   /** The zone palette, nudged clear of whatever skin is equipped. */
@@ -199,6 +224,7 @@ class Game {
     this.haptics.setEnabled(this.profile.haptics);
     this.fx.reduced = !!this.profile.reducedFx;
     this.renderer.setReduced(!!this.profile.reducedFx);
+    this.renderer.setColorSafe(!!this.profile.colorSafe);
   }
 
   _applyZone(zoneIndex) {
@@ -214,16 +240,21 @@ class Game {
     this._unlockAudio();
     this.runMode = mode;
 
+    const practice = mode === 'practice';
+
     meta.ensureDaily(this.profile);
     daily.ensureDaily(this.profile);
     // First run of the day: the streak advances and the daily bonus is simply
     // handed over. No pop-up, no button to hunt for, no reason to feel behind.
-    if (meta.registerPlay(this.profile)) {
+    // Practice is outside all of it — it earns nothing, so it costs nothing.
+    if (!practice && meta.registerPlay(this.profile)) {
       const bonus = meta.claimDailyReward(this.profile);
       if (bonus) this.ui.toast(`DAY ${this.profile.streak} · +${bonus} ◈`, 2200);
     }
-    for (const milestone of meta.claimStreakMilestones(this.profile)) {
-      this.ui.toast(`${milestone.name.toUpperCase()} · +${milestone.reward} ◈`, 2400);
+    if (!practice) {
+      for (const milestone of meta.claimStreakMilestones(this.profile)) {
+        this.ui.toast(`${milestone.name.toUpperCase()} · +${milestone.reward} ◈`, 2400);
+      }
     }
 
     let runSeed = seed;
@@ -238,7 +269,7 @@ class Game {
       }
     }
 
-    this.world.reset(runSeed);
+    this.world.reset(runSeed, { practice });
     // Identifies this run across a revive, so it files one score, not two.
     this.runId = `${runSeed}:${Date.now()}`;
     this.autopilot = createAutopilot({ greedy: true, sloppiness: 0.05 });
@@ -251,6 +282,7 @@ class Game {
     this.deathTimer = 0;
     this.mode = 'play';
     this.ui.resetHud();
+    this.ui.setPractice(practice);
     this.ui.showGame();
     this._applyZone(0);
     if (mode === 'daily') this.ui.toast(`DAILY ${daily.dailyLabel(todayKey())}`, 1600);
@@ -284,6 +316,7 @@ class Game {
     this.autopilot = createAutopilot({ greedy: true, sloppiness: 0.05 });
     this.fx.clear();
     this.renderer.resetRun();
+    this.ui.setPractice(false);
     this.ui.show('title');
   }
 
@@ -500,7 +533,10 @@ class Game {
   }
 
   toggleSetting(key, value) {
-    const map = { music: 'music', sfx: 'sfx', haptics: 'haptics', reduced: 'reducedFx' };
+    const map = {
+      music: 'music', sfx: 'sfx', haptics: 'haptics',
+      reduced: 'reducedFx', colorsafe: 'colorSafe',
+    };
     this.profile[map[key]] = value;
     this._applySettings();
     if (key === 'sfx' && value) this.audio.play('ui');
@@ -685,7 +721,23 @@ class Game {
       }
 
       case EVT.MULTIPLIER: {
-        if (!quiet && e.rising && e.value >= 2) this._coach('mult', 'KEEP THE CHAIN ALIVE');
+        // Every step of the ladder gets its own beat. Without one the multiplier
+        // is a number in the corner; with one it is the thing the run is about.
+        if (e.rising && e.value >= 2 && e.value < OVERDRIVE_AT) {
+          const p = r.orbitPoint(this.world.player.angle);
+          this.fx.wave(p.x, p.y, r.unit * 0.04, r.unit * (0.20 + e.value * 0.03), {
+            color: skin.glow, width: 3, life: 0.42,
+          });
+          if (!quiet) {
+            const text = `x${e.value}`;
+            const size = Math.round(r.unit * 0.07);
+            const label = r.labelPoint(this.world.player.angle, TUNE.playerOrbit + 0.26, text, size);
+            this.fx.text(label.x, label.y, text, { color: '#ffd23f', size, life: 0.7, vy: -30 });
+            this.audio.play('power');
+            this.haptics.fire('light');
+            this._coach('mult', 'KEEP THE CHAIN ALIVE');
+          }
+        }
         break;
       }
 
@@ -762,29 +814,54 @@ class Game {
         if (!quiet) this.ui.showZone(e.zone, e.lap);
         this._applyZone(e.zone);
         r.onZone();
-        this.fx.wave(r.cx, r.cy, r.unit * 0.1, r.unit * 1.5, {
-          color: zoneByIndex(e.zone).palette.accent, width: 2, life: 0.6,
-        });
+        // A new zone arrives as a wipe: one ring racing out past the field and
+        // one collapsing into the core behind it, so the change reads as a place
+        // you crossed into rather than a palette that happened to shift.
+        const accent = zoneByIndex(e.zone).palette.accent;
+        this.fx.wave(r.cx, r.cy, r.unit * 0.1, r.unit * 1.6, { color: accent, width: 3, life: 0.7 });
+        if (!this.fx.reduced) {
+          this.fx.wave(r.cx, r.cy, r.unit * 1.5, r.unit * 0.12, {
+            color: zoneByIndex(e.zone).palette.ring, width: 2, life: 0.55,
+          });
+          this.fx.burst(r.cx, r.cy, 14, {
+            color: [accent, '#ffffff'], speed: 300, size: r.unit * 0.008, life: 0.8, drag: 1.4,
+          });
+        }
         break;
       }
 
       case EVT.HIT: {
         const p = r.orbitPoint(e.angle);
-        this.fx.burst(p.x, p.y, 48, {
-          color: ['#ffffff', skin.glow, '#ff5a5a'], speed: 420, size: r.unit * 0.014, life: 0.9, shape: 'spark',
+        // A practice hit is a lesson, not an ending: a quarter of the debris,
+        // no white-out, and the run carries straight on.
+        const heavy = !e.practice;
+        this.fx.burst(p.x, p.y, heavy ? 48 : 14, {
+          color: ['#ffffff', skin.glow, '#ff5a5a'],
+          speed: heavy ? 420 : 240, size: r.unit * 0.014, life: heavy ? 0.9 : 0.45, shape: 'spark',
         });
-        this.fx.burst(p.x, p.y, 26, {
-          color: [skin.trail, '#ffffff'], speed: 180, size: r.unit * 0.02, life: 1.2, shape: 'shard',
-        });
-        this.fx.wave(p.x, p.y, r.unit * 0.02, r.unit * 0.9, { color: '#ffffff', width: 8, life: 0.6 });
-        this.fx.addShake(30);
-        this.fx.addFlash(0.55, '#ffffff');
-        if (!quiet) {
-          this.audio.play('hit');
-          this.audio.setIntensity(0.1);
-          this.haptics.fire('error');
+        if (heavy) {
+          this.fx.burst(p.x, p.y, 26, {
+            color: [skin.trail, '#ffffff'], speed: 180, size: r.unit * 0.02, life: 1.2, shape: 'shard',
+          });
         }
-        if (this.mode === 'play') this._die();
+        this.fx.wave(p.x, p.y, r.unit * 0.02, r.unit * (heavy ? 0.9 : 0.4), {
+          color: '#ffffff', width: heavy ? 8 : 4, life: heavy ? 0.6 : 0.35,
+        });
+        // The run collapsing back into the core: a ring that closes rather than
+        // opens, which is the shape of an ending.
+        if (heavy && !this.fx.reduced) {
+          this.fx.wave(r.cx, r.cy, r.unit * 1.4, r.unit * 0.08, {
+            color: skin.glow, width: 3, life: 0.75,
+          });
+        }
+        this.fx.addShake(heavy ? 30 : 9);
+        this.fx.addFlash(heavy ? 0.55 : 0.14, '#ffffff');
+        if (!quiet) {
+          this.audio.play(heavy ? 'hit' : 'chainBreak');
+          if (heavy) this.audio.setIntensity(0.1);
+          this.haptics.fire(heavy ? 'error' : 'warning');
+        }
+        if (heavy && this.mode === 'play') this._die();
         break;
       }
 

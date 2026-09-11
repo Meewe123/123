@@ -66,6 +66,7 @@ export const DEFAULT_PROFILE = Object.freeze({
   music: true,
   haptics: true,
   reducedFx: false,
+  colorSafe: false,
   seenTutorial: false,
   tutorialSeen: [],
 });

@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import * as meta from '../www/src/game/meta.js';
 import * as store from '../www/src/engine/storage.js';
 import * as achievements from '../www/src/game/achievements.js';
-import { SKINS, TRAILS, DAILY_REWARDS, STREAK_MILESTONES } from '../www/src/game/config.js';
+import {
+  SKINS, TRAILS, DAILY_REWARDS, STREAK_MILESTONES, ACHIEVEMENTS, achievementAt,
+} from '../www/src/game/config.js';
 
 const freshProfile = () => store.migrate(null);
 const day = (n) => new Date(2026, 0, n, 12, 0, 0);
@@ -230,4 +232,39 @@ test('a build with no store does not count what it cannot sell', () => {
   const shown = meta.visibleItems('skin', { premium: false });
   assert.ok(shown.every((i) => i.unlock !== 'premium'));
   assert.equal(meta.visibleItems('skin').length, SKINS.length);
+});
+
+test('the home screen is always pointed at something reachable', () => {
+  // A goal that names an action beats one that names a number, and a fresh
+  // profile must never be shown a hundred-PERFECT target as its first step.
+  const profile = store.migrate(null);
+  const first = meta.nextGoal(profile);
+  assert.ok(first, 'a fresh profile has a next goal');
+  assert.equal(first.kind, 'achievement');
+  assert.ok(first.goal <= 3, `opening goal asks for ${first.goal}`);
+  assert.ok(first.at < first.goal, 'a goal already met is not a goal');
+
+  // Earn everything: the goal falls back to the cheapest thing still unowned.
+  profile.achievements = ACHIEVEMENTS.map((a) => a.id);
+  const later = meta.nextGoal(profile);
+  assert.equal(later.kind, 'cosmetic');
+  assert.ok(later.goal > 0 && later.at >= 0 && later.at <= later.goal);
+
+  // Own everything buyable too: there is nothing left to point at, and the
+  // home screen has to cope with that rather than render an empty card.
+  for (const kind of ['skin', 'trail', 'effect']) {
+    for (const item of meta.visibleItems(kind)) meta.grantCosmetic(profile, kind, item.id);
+  }
+  assert.equal(meta.nextGoal(profile), null);
+});
+
+test('achievement progress is a real fraction, not a guess', () => {
+  const profile = store.migrate(null);
+  for (const a of ACHIEVEMENTS) {
+    assert.ok(a.goal > 0, `${a.id} has no target`);
+    assert.equal(typeof a.at, 'function', `${a.id} has no metric`);
+    assert.equal(achievementAt(a, profile) <= a.goal, true, `${a.id} starts above its target`);
+    assert.equal(a.test(profile), achievementAt(a, profile) >= a.goal,
+      `${a.id}: test and progress disagree on a fresh profile`);
+  }
 });

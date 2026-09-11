@@ -32,6 +32,7 @@
   <div id="chain-bar"><i></i></div>
   <div id="powerbar"></div>
   <div id="coach"></div>
+  <div id="practice-badge" hidden>PRACTICE · HITS COST THE CHAIN, NOT THE RUN</div>
   <div id="zone-banner"><div class="z-num">ZONE 1</div><div class="z-name">FLOW</div></div>
 </div>
 
@@ -45,6 +46,12 @@
       <span class="word two">RUSH</span>
       <div class="tag">SAFE OR GREED</div>
     </div>
+    <div class="next-goal" id="next-goal" hidden>
+      <div class="ng-label">NEXT</div>
+      <div class="ng-name" id="ng-name"></div>
+      <div class="ng-bar"><i id="ng-fill"></i></div>
+      <div class="ng-meta" id="ng-meta"></div>
+    </div>
     <div class="home-stats">
       <div><b id="title-best">0</b><span>BEST</span></div>
       <div><b id="title-daily">—</b><span>DAILY</span></div>
@@ -53,6 +60,7 @@
     <div class="spacer"></div>
     <button class="btn primary huge" id="btn-play" data-ui>PLAY</button>
     <div class="tap-hint">or tap anywhere</div>
+    <button class="btn small ghost" id="btn-practice" data-ui>PRACTICE</button>
     <div class="icon-row mt">
       <button class="icon-btn" id="btn-daily-open" data-ui aria-label="Daily run">◷<span class="badge" id="badge-daily" hidden>!</span></button>
       <button class="icon-btn" id="btn-collection" data-ui aria-label="Collection">▦</button>
@@ -205,6 +213,8 @@
       <div class="row"><span>Sound effects</span><button class="switch" id="sw-sfx" role="switch" aria-checked="true" data-ui></button></div>
       <div class="row"><span>Haptics</span><button class="switch" id="sw-haptics" role="switch" aria-checked="true" data-ui></button></div>
       <div class="row"><span>Reduced effects<span class="sub">Fewer particles, no screen shake. Gameplay is identical.</span></span><button class="switch" id="sw-reduced" role="switch" aria-checked="false" data-ui></button></div>
+      <div class="row"><span>Colour-safe pickups<span class="sub">A hard dark edge on every orb. Each pickup already has its own shape.</span></span><button class="switch" id="sw-colorsafe" role="switch" aria-checked="false" data-ui></button></div>
+      <div class="row" id="audio-blocked" hidden><span>Sound is blocked<span class="sub">The browser or your phone's silent switch is muting this page. On an iPhone, flick the ring/silent switch and try again.</span></span><button class="btn small" id="btn-audio-retry" data-ui>RETRY</button></div>
     </div>
     <div class="panel mt">
       <div class="stat-grid">
@@ -221,7 +231,7 @@
     <div class="panel mt center">
       <div class="no-ads">NO ADS. JUST PLAY.</div>
       <div class="fineprint">
-        Orbital Rush <span id="app-version">1.2.0</span><br />
+        Orbital Rush <span id="app-version">1.3.0</span><br />
         No tracking. No account. Everything you unlock stays on this device.
       </div>
       <button class="btn small ghost mt" id="btn-reset" data-ui>RESET PROGRESS</button>

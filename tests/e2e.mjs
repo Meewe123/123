@@ -353,6 +353,85 @@ async function main() {
     check('shards survive a reload', reloaded.shards > 0, `shards=${reloaded.shards}`);
     check('coaching lines are not repeated', reloaded.coached > 0, `seen=${reloaded.coached}`);
 
+    console.log('\naccessibility and practice');
+    // Sound: the failure that used to be invisible. A refused unlock must not be
+    // remembered as success, and when it is genuinely refused the player has to
+    // be told rather than left with toggles that claim everything is on.
+    await page.locator('#btn-settings').click();
+    await page.waitForSelector('#screen-settings.on', { timeout: 3000 });
+    await wait(400);
+    const audio = await page.evaluate(() => ({
+      running: globalThis.__ORBITAL__.audio.running,
+      blocked: globalThis.__ORBITAL__.audio.blocked,
+      tries: globalThis.__ORBITAL__._audioTries,
+    }));
+    // After a real gesture the context exists, so it is either running or
+    // refused — never both, and never neither.
+    check('audio reports its real state after a gesture',
+      audio.running !== audio.blocked, JSON.stringify(audio));
+    await page.evaluate(() => globalThis.__ORBITAL__.ui.refreshSettings());
+    check('the blocked-sound notice matches whether sound is blocked',
+      (await page.locator('#audio-blocked').isVisible()) === audio.blocked,
+      `blocked=${audio.blocked}`);
+
+    await page.locator('#sw-colorsafe').click();
+    await wait(150);
+    check('colour-safe mode reaches the renderer',
+      await page.evaluate(() => globalThis.__ORBITAL__.renderer.colorSafe === true
+        && globalThis.__ORBITAL__.profile.colorSafe === true));
+    await page.locator('#sw-colorsafe').click();
+    await wait(150);
+    await page.locator('#btn-settings-back').click();
+    await page.waitForSelector('#screen-title.on', { timeout: 3000 });
+
+    check('the home screen names a next goal',
+      (await page.locator('#next-goal').isVisible())
+      && (await page.locator('#ng-name').innerText()).length > 3,
+      await page.locator('#ng-name').innerText());
+
+    const beforePractice = await page.evaluate(() => ({
+      best: globalThis.__ORBITAL__.profile.bestScore,
+      runs: globalThis.__ORBITAL__.profile.runs,
+      shards: globalThis.__ORBITAL__.profile.shards,
+    }));
+    await page.locator('#btn-practice').click();
+    await wait(400);
+    check('practice is marked on screen',
+      await page.locator('#practice-badge').isVisible());
+    check('practice hides the run total it never banks',
+      !(await page.locator('#shard-pill').isVisible()));
+    // Walk the player straight into a wall, twice.
+    const practice = await page.evaluate(async () => {
+      const g = globalThis.__ORBITAL__;
+      g.world.combo = 9;
+      for (let i = 0; i < 2; i++) {
+        const ring = g.world.rings[0];
+        g.world.shieldCharges = 0;
+        g.world.shieldTimer = 0;
+        g.world._onCollision(ring, g.world.player.angle);
+        g.world.drainEvents(() => {});
+      }
+      return { alive: g.world.alive, hits: g.world.practiceHits, combo: g.world.combo, mode: g.mode };
+    });
+    check('a practice hit costs the chain, not the run',
+      practice.alive && practice.hits === 2 && practice.combo === 0 && practice.mode === 'play',
+      JSON.stringify(practice));
+
+    await page.locator('#btn-pause').click();
+    await page.waitForSelector('#screen-pause.on', { timeout: 3000 });
+    await page.locator('#btn-quit').click();
+    await page.waitForSelector('#screen-title.on', { timeout: 3000 });
+    const afterPractice = await page.evaluate(() => ({
+      best: globalThis.__ORBITAL__.profile.bestScore,
+      runs: globalThis.__ORBITAL__.profile.runs,
+      shards: globalThis.__ORBITAL__.profile.shards,
+    }));
+    check('practice banks nothing at all',
+      JSON.stringify(afterPractice) === JSON.stringify(beforePractice),
+      `${JSON.stringify(beforePractice)} -> ${JSON.stringify(afterPractice)}`);
+    check('leaving practice clears its badge',
+      !(await page.locator('#practice-badge').isVisible()));
+
     console.log('\nresponsive layout');
     for (const [label, size] of [['small-phone', { width: 320, height: 568 }],
                                  ['tablet', { width: 834, height: 1112 }],

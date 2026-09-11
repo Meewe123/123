@@ -30,13 +30,16 @@ export class UI {
       runShards: $('run-shards'),
       powerbar: $('powerbar'),
       coach: $('coach'),
+      practiceBadge: $('practice-badge'),
+      shardPill: $('shard-pill'),
       zoneBanner: $('zone-banner'),
       zoneNum: $('zone-banner').querySelector('.z-num'),
       zoneName: $('zone-banner').querySelector('.z-name'),
       toast: $('toast'),
       screens: {},
       switches: {
-        music: $('sw-music'), sfx: $('sw-sfx'), haptics: $('sw-haptics'), reduced: $('sw-reduced'),
+        music: $('sw-music'), sfx: $('sw-sfx'), haptics: $('sw-haptics'),
+        reduced: $('sw-reduced'), colorsafe: $('sw-colorsafe'),
       },
     };
     for (const name of SCREENS) this.el.screens[name] = $(`screen-${name}`);
@@ -89,6 +92,8 @@ export class UI {
     tap($('btn-settings'), () => this.show('settings'));
     tap($('btn-settings-back'), () => this.show('title'));
     tap($('btn-reset'), () => h.onReset());
+    tap($('btn-audio-retry'), () => h.onAudioRetry?.());
+    tap($('btn-practice'), () => h.onPractice?.());
 
     for (const [key, el] of Object.entries(this.el.switches)) {
       tap(el, () => {
@@ -118,6 +123,13 @@ export class UI {
 
   showGame() {
     this.show(null);
+  }
+
+  /** A mode the player can forget they are in is a mode that costs a record. */
+  setPractice(on) {
+    this.el.practiceBadge.hidden = !on;
+    // Practice banks nothing, so it does not show a running total as if it did.
+    this.el.shardPill.hidden = !!on;
   }
 
   setProfile(profile) {
@@ -255,6 +267,21 @@ export class UI {
     $('title-best').textContent = commas(p.bestScore);
     $('title-daily').textContent = p.dailyBest?.score ? commas(p.dailyBest.score) : '—';
     $('title-streak').textContent = String(p.streak || 0);
+    // One reason to press play, chosen for the player: the nearest thing left to
+    // earn, with how close it is. The description is the headline because it
+    // names an action; the name of the badge is decoration.
+    const goal = this.h.nextGoal?.();
+    const box = $('next-goal');
+    box.hidden = !goal;
+    if (goal) {
+      $('ng-name').textContent = goal.desc;
+      $('ng-fill').style.width = `${Math.round(clamp(goal.share, 0, 1) * 100)}%`;
+      const progress = `${commas(Math.floor(goal.at))} / ${commas(goal.goal)}`;
+      $('ng-meta').textContent = goal.reward
+        ? `${progress} · +${commas(goal.reward)} ◈`
+        : `${progress} ◈`;
+    }
+
     $('badge-shop').hidden = !this.h.hasShopNews?.();
     const claimable = this.h.claimableCount?.() || 0;
     const dailyBadge = $('badge-daily');
@@ -533,6 +560,10 @@ export class UI {
     this.el.switches.sfx.setAttribute('aria-checked', String(!!p.sfx));
     this.el.switches.haptics.setAttribute('aria-checked', String(!!p.haptics));
     this.el.switches.reduced.setAttribute('aria-checked', String(!!p.reducedFx));
+    this.el.switches.colorsafe.setAttribute('aria-checked', String(!!p.colorSafe));
+    // Told, not hidden: a silent game with the toggles showing "on" reads as a
+    // broken game, and the fix is usually one switch on the side of the phone.
+    $('audio-blocked').hidden = !this.h.audioBlocked?.();
     $('st-runs').textContent = commas(p.runs);
     $('st-rings').textContent = commas(p.totalRings);
     $('st-time').textContent = mmss(p.totalTimeMs / 1000);

@@ -75,8 +75,11 @@ export class World {
     this.reset(seed);
   }
 
-  reset(seed = (Math.random() * 0xffffffff) >>> 0) {
+  reset(seed = (Math.random() * 0xffffffff) >>> 0, { practice = false } = {}) {
     this.seed = seed >>> 0;
+    /** Practice: a hit costs the chain, not the run. Never scored, never saved. */
+    this.practice = !!practice;
+    this.practiceHits = 0;
     this.rng.seed(this.seed);
 
     this.time = 0;
@@ -643,6 +646,19 @@ export class World {
       this.shieldCharges--;
       this.shieldTimer = 0.85;
       this.emit(EVT.SHIELD_BREAK, { angle, remaining: this.shieldCharges });
+      return;
+    }
+    // Practice runs cost the chain and a beat of invulnerability instead of the
+    // run. Everything else about them is the real game — same generator, same
+    // collision, same rings — because a practice mode that plays differently
+    // teaches the wrong timing.
+    if (this.practice) {
+      this.practiceHits++;
+      const before = this.multiplier;
+      this.combo = 0;
+      this.shieldTimer = 1.1;
+      this.emit(EVT.HIT, { angle, score: this.score, ring, practice: true });
+      this._multiplierChanged(before);
       return;
     }
     this.alive = false;

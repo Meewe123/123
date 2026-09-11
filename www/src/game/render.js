@@ -46,6 +46,7 @@ export class Renderer {
     this.cy = 0;
     this.unit = 1;
     this.reduced = false;
+    this.colorSafe = false;
 
     this.pal = {};
     this._targetRgb = {};
@@ -82,6 +83,16 @@ export class Renderer {
 
   setReduced(on) {
     this.reduced = !!on;
+  }
+
+  /**
+   * Colour-safe mode does not try to simulate a colour-vision deficiency and
+   * remap hues — that guesses at a deficiency it cannot know. It adds the thing
+   * that helps whatever the deficiency is: a hard dark edge on every pickup and
+   * a brighter core on every ring, so the separation survives without hue.
+   */
+  setColorSafe(on) {
+    this.colorSafe = !!on;
   }
 
   resize() {
@@ -644,18 +655,37 @@ export class Renderer {
       ctx.fill();
       ctx.restore();
 
+      // Every pickup has its own silhouette as well as its own colour, so the
+      // four of them can be told apart with no colour vision at all: a shard is
+      // a disc, a shield a hexagon, slow-mo a square, double-score a diamond.
       ctx.save();
       ctx.globalAlpha = alpha;
+      ctx.translate(x, y);
+      ctx.rotate(a + Math.PI / 2);
+      const size = r * bob;
+
+      if (this.colorSafe) {
+        // A dark ink line under every pickup: when hues collapse, the edge is
+        // what separates an orb from the ring it is sitting on.
+        ctx.strokeStyle = 'rgba(4,7,14,0.95)';
+        ctx.lineWidth = Math.max(2, size * 0.42);
+        this._pickupPath(ctx, orb.type, size);
+        ctx.stroke();
+      }
+
       ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(x, y, r * bob, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      ctx.beginPath();
-      ctx.arc(x - r * 0.22, y - r * 0.26, r * 0.34, 0, TAU);
+      this._pickupPath(ctx, orb.type, size);
       ctx.fill();
 
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(-size * 0.22, -size * 0.26, size * 0.32, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+
       if (isPower) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
         ctx.strokeStyle = 'rgba(255,255,255,0.95)';
         ctx.lineWidth = Math.max(1.2, r * 0.16);
         ctx.beginPath();
@@ -666,8 +696,8 @@ export class Renderer {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(orb.type === 'shield' ? 'S' : orb.type === 'slow' ? '~' : '2', x, y + r * 0.04);
+        ctx.restore();
       }
-      ctx.restore();
     }
   }
 
@@ -961,6 +991,31 @@ export class Renderer {
         break;
     }
     ctx.restore();
+  }
+
+  /** One silhouette per pickup type, drawn around the origin. */
+  _pickupPath(ctx, type, r) {
+    ctx.beginPath();
+    if (type === 'shield') {
+      for (let i = 0; i < 6; i++) {
+        const ang = -Math.PI / 2 + (TAU / 6) * i;
+        const px = Math.cos(ang) * r * 1.12;
+        const py = Math.sin(ang) * r * 1.12;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    } else if (type === 'slow') {
+      ctx.rect(-r * 0.92, -r * 0.92, r * 1.84, r * 1.84);
+    } else if (type === 'double') {
+      ctx.moveTo(0, -r * 1.24);
+      ctx.lineTo(r * 1.0, 0);
+      ctx.lineTo(0, r * 1.24);
+      ctx.lineTo(-r * 1.0, 0);
+      ctx.closePath();
+    } else {
+      ctx.arc(0, 0, r, 0, TAU);
+    }
   }
 
   _shapePath(ctx, shape, r) {
