@@ -10,13 +10,16 @@
 
 const KEY = 'orbital-rush/profile/v1';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export const DEFAULT_PROFILE = Object.freeze({
   version: SAVE_VERSION,
 
   // --- records --------------------------------------------------------------
+  // `bestScore` is the best of all of them; `bests` keeps one per difficulty
+  // preset, because an easy best and a hard best are not the same claim.
   bestScore: 0,
+  bests: { easy: 0, normal: 0, hard: 0 },
   bestZone: 0,
   bestMultiplier: 1,
   bestChain: 0,
@@ -29,6 +32,7 @@ export const DEFAULT_PROFILE = Object.freeze({
   totalPerfects: 0,
   totalOrbs: 0,
   totalGreedOrbs: 0,
+  totalChainSaves: 0,
   noShieldZone: 0,
   dailyRuns: 0,
 
@@ -60,6 +64,13 @@ export const DEFAULT_PROFILE = Object.freeze({
 
   // --- local leaderboard ----------------------------------------------------
   recent: [],
+
+  // --- how you play ---------------------------------------------------------
+  difficulty: 'normal',
+  // Where this player's chain keeps breaking, indexed by zone. Informational:
+  // the summary can tell them something about their own play instead of only
+  // repeating the score back at them.
+  chainBreaksByZone: [],
 
   // --- settings -------------------------------------------------------------
   sfx: true,
@@ -113,12 +124,26 @@ function upgradeV1(parsed) {
   return out;
 }
 
+/**
+ * Version 2 had a single best score and no difficulty preset. Everyone who
+ * played it was playing what is now NORMAL, so that is where their record goes.
+ */
+function upgradeV2(parsed) {
+  return {
+    ...parsed,
+    difficulty: 'normal',
+    bests: { easy: 0, normal: Math.max(0, parsed.bestScore | 0), hard: 0 },
+  };
+}
+
 /** Merge a stored profile onto the current defaults, dropping unknown keys. */
 export function migrate(parsed) {
   const out = clone(DEFAULT_PROFILE);
   if (!parsed || typeof parsed !== 'object') return out;
 
-  const source = (parsed.version ?? 1) < 2 ? upgradeV1(parsed) : parsed;
+  let source = parsed;
+  if ((source.version ?? 1) < 2) source = upgradeV1(source);
+  if ((source.version ?? 1) < 3) source = upgradeV2(source);
 
   for (const key of Object.keys(DEFAULT_PROFILE)) {
     const v = source[key];

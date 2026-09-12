@@ -32,7 +32,9 @@
 
 import { RNG } from '../engine/rng.js';
 import { TAU, wrap, angleDist, clamp, lerp } from '../engine/util.js';
-import { TUNE, ZONES, OVERDRIVE_AT, difficultyAt, zoneIndexAt, lapAt } from './config.js';
+import {
+  TUNE, ZONES, OVERDRIVE_AT, difficultyAt, difficultyById, zoneIndexAt, lapAt,
+} from './config.js';
 
 export const EVT = {
   FLIP: 'flip',
@@ -69,17 +71,20 @@ const EDGE_FORGIVENESS = 0.02;
 let nextRingId = 1;
 
 export class World {
-  constructor(seed = 1) {
+  constructor(seed = 1, opts = {}) {
     this.rng = new RNG(seed);
     this.events = [];
-    this.reset(seed);
+    this.reset(seed, opts);
   }
 
-  reset(seed = (Math.random() * 0xffffffff) >>> 0, { practice = false } = {}) {
+  reset(seed = (Math.random() * 0xffffffff) >>> 0, { practice = false, difficulty } = {}) {
     this.seed = seed >>> 0;
     /** Practice: a hit costs the chain, not the run. Never scored, never saved. */
     this.practice = !!practice;
     this.practiceHits = 0;
+    /** Which preset's ramp this run climbs. Geometry is unaffected — see config. */
+    this.difficultyId = difficultyById(difficulty).id;
+    this.ramp = difficultyById(difficulty).ramp;
     this.rng.seed(this.seed);
 
     this.time = 0;
@@ -130,7 +135,7 @@ export class World {
   // ------------------------------------------------------------- getters ---
 
   get difficulty() {
-    return difficultyAt(this.score);
+    return difficultyAt(this.score, this.ramp);
   }
 
   /** x8: the run is in OVERDRIVE. Purely a state to feel, never a free pass. */
@@ -591,7 +596,7 @@ export class World {
       const before = this.multiplier;
       const lost = this.combo;
       this.combo = 0;
-      this.emit(EVT.COMBO_BREAK, { lost, from: before });
+      this.emit(EVT.COMBO_BREAK, { lost, from: before, zone: this.zone });
       this._multiplierChanged(before);
     }
 

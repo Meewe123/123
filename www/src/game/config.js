@@ -85,12 +85,33 @@ export const TUNE = {
 export const OVERDRIVE_AT = TUNE.maxMultiplier;
 
 /**
- * 0..1 difficulty ramp. Tuned so the gap between rings goes ~0.9s -> ~0.4s over
- * the first couple of hundred rings, which is about as fast as a thumb can
- * usefully react.
+ * How fast the ramp climbs, as a preset the player picks.
+ *
+ * A preset changes only *when* the game gets hard, never the geometry: the gap
+ * floor and the reachable arc are computed from whatever difficulty is live at
+ * that moment, so a gentler ramp produces a gentler game that is exactly as
+ * honest. The ceiling is the same in all three — easy reaches it later, not
+ * never — so nobody is playing a different game, only a different pace.
  */
-export function difficultyAt(score) {
-  return 1 - Math.exp(-score / 95);
+export const DIFFICULTIES = [
+  { id: 'easy', name: 'EASY', ramp: 155, desc: 'The climb takes longer. Same ceiling.' },
+  { id: 'normal', name: 'NORMAL', ramp: 95, desc: 'The pace the game was tuned at.' },
+  { id: 'hard', name: 'HARD', ramp: 58, desc: 'Top speed arrives early.' },
+];
+
+export const DEFAULT_DIFFICULTY = 'normal';
+
+export function difficultyById(id) {
+  return DIFFICULTIES.find((d) => d.id === id) || DIFFICULTIES[1];
+}
+
+/**
+ * 0..1 difficulty ramp. At the normal ramp the gap between rings goes ~0.9s ->
+ * ~0.4s over the first couple of hundred rings, which is about as fast as a
+ * thumb can usefully react.
+ */
+export function difficultyAt(score, ramp = difficultyById(DEFAULT_DIFFICULTY).ramp) {
+  return 1 - Math.exp(-score / ramp);
 }
 
 export function lapAt(score) {
@@ -212,6 +233,34 @@ export const ZONES = [
     fx: { sky: 'void', motes: 'none', perfect: 'void', shake: 1.2 },
     voice: 'void',
   },
+  {
+    id: 'pulsar',
+    name: 'PULSAR',
+    key: -2,
+    palette: P('#0a0a1e', '#1b1b52', '#7cf6ff', '#2a6a82', '#ffffff', '#ffc24d', '#1c2a5e'),
+    gaps: () => 2,
+    gapHalf: 0.58,
+    rot: [0.70, 1.15],
+    // Breathing rings that also swap direction: the timing is readable, but
+    // only if you watch the beat instead of reacting to the edge.
+    flags: { pulse: true, alternate: true },
+    fx: { sky: 'pulse', motes: 'pulse', perfect: 'ripple', shake: 1.2 },
+    voice: 'pulsar',
+  },
+  {
+    id: 'singularity',
+    name: 'SINGULARITY',
+    key: -6,
+    palette: P('#0b0208', '#2a0512', '#ff5470', '#7a1c30', '#ffe3ec', '#7dffd4', '#3a0a18'),
+    gaps: (rng) => (rng.chance(0.45) ? 2 : 1),
+    gapHalf: 0.52,
+    rot: [0.95, 1.40],
+    // Everything at once: the gap slides while a second ring is already on its
+    // way. The floor still holds — it is computed, not hoped for.
+    flags: { drift: true, twin: true },
+    fx: { sky: 'event', motes: 'fall', perfect: 'collapse', shake: 1.5 },
+    voice: 'singularity',
+  },
 ];
 
 // A typo-proof guard: palettes must be complete 7-colour sets, and every zone
@@ -328,6 +377,10 @@ export const ACHIEVEMENTS = [
   { id: 'greed_50', name: 'No Guts', desc: 'Take 50 greed orbs', reward: 250, at: (p) => p.totalGreedOrbs, goal: 50 },
   { id: 'no_shield', name: 'Bare Handed', desc: 'Reach Zone 3 without taking a shield', reward: 200, at: (p) => p.noShieldZone + 1, goal: 3 },
   { id: 'daily_done', name: 'Regular', desc: 'Finish a Daily Run', reward: 100, at: (p) => p.dailyRuns, goal: 1 },
+  { id: 'saves_25', name: 'Threadneedle', desc: 'Hold 25 chains with a dead-centre pass', reward: 350, at: (p) => p.totalChainSaves, goal: 25 },
+  { id: 'zone_10', name: 'Event Horizon', desc: 'Reach Zone 10', reward: 700, at: (p) => p.bestZone + 1, goal: 10 },
+  { id: 'greed_200', name: 'All In', desc: 'Take 200 greed orbs', reward: 600, at: (p) => p.totalGreedOrbs, goal: 200 },
+  { id: 'perfect_500', name: 'Watchmaker', desc: 'Land 500 PERFECTs', reward: 900, at: (p) => p.totalPerfects, goal: 500 },
 ].map((a) => ({ ...a, test: (p) => achievementAt(a, p) >= a.goal }));
 
 /** How far a profile has come toward one achievement, clamped to its target. */

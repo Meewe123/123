@@ -3,7 +3,7 @@
  * after a run is committed. Nothing in the UI can grant one.
  */
 
-import { ACHIEVEMENTS, achievementById } from './config.js';
+import { ACHIEVEMENTS, achievementById, achievementAt } from './config.js';
 
 export function isUnlocked(profile, id) {
   return (profile.achievements || []).includes(id);
@@ -36,7 +36,14 @@ export function progress(profile) {
   return { unlocked: (profile.achievements || []).length, total: ACHIEVEMENTS.length };
 }
 
-/** Achievements listed for the profile screen, unlocked first. */
+/**
+ * Achievements listed for the profile screen. Each carries how far along it
+ * is, so a target like "500 PERFECTs" reads as a distance rather than a wall.
+ */
 export function listed(profile) {
-  return ACHIEVEMENTS.map((a) => ({ ...a, unlocked: isUnlocked(profile, a.id) }));
+  return ACHIEVEMENTS.map((a) => ({
+    ...a,
+    unlocked: isUnlocked(profile, a.id),
+    at: achievementAt(a, profile),
+  }));
 }

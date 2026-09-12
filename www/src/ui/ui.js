@@ -5,7 +5,10 @@
  */
 
 import { commas, mmss, clamp } from '../engine/util.js';
-import { ZONES, POWERUPS, TUNE, OVERDRIVE_AT, COSMETIC_KINDS, zoneByIndex } from '../game/config.js';
+import {
+  ZONES, POWERUPS, TUNE, OVERDRIVE_AT, COSMETIC_KINDS, zoneByIndex,
+  DIFFICULTIES, difficultyById,
+} from '../game/config.js';
 import {
   isComplete, unlockState, kindOf, collectionProgress, nextStreakMilestone, visibleItems,
 } from '../game/meta.js';
@@ -104,6 +107,7 @@ export class UI {
     }
 
     this._buildShopTabs();
+    this._buildDifficulty();
   }
 
   // -------------------------------------------------------------- screens ---
@@ -264,7 +268,13 @@ export class UI {
     // Ask first: this rolls the daily over if the date has changed, so the
     // numbers below are today's and not yesterday's.
     const dailyOpen = this.h.dailyAvailable?.();
-    $('title-best').textContent = commas(p.bestScore);
+    // The best shown is the best *for the preset you are about to play*, so the
+    // number on screen is the one the next run is actually chasing.
+    const preset = difficultyById(p.difficulty);
+    for (const btn of $('difficulty-row').children) {
+      btn.setAttribute('aria-pressed', String(btn.getAttribute('data-difficulty') === preset.id));
+    }
+    $('title-best').textContent = commas((p.bests && p.bests[preset.id]) || 0);
     $('title-daily').textContent = p.dailyBest?.score ? commas(p.dailyBest.score) : '—';
     $('title-streak').textContent = String(p.streak || 0);
     // One reason to press play, chosen for the player: the nearest thing left to
@@ -335,6 +345,25 @@ export class UI {
     revive.textContent = `REVIVE · ${TUNE.reviveCost} ◈`;
     revive.disabled = !result.canRevive;
     $('btn-over-daily').classList.toggle('hidden', result.mode === 'daily');
+
+    // A read on the run, not another scoreboard: how precise it was, how greedy,
+    // and — once there is enough history to mean anything — where this player's
+    // chain keeps going.
+    const parts = [];
+    if (result.score > 0) {
+      parts.push(`<b>${Math.round((result.perfects / result.score) * 100)}%</b> of rings threaded dead centre`);
+    }
+    if (result.orbs > 0) {
+      parts.push(`<b>${Math.round((result.greedOrbs / result.orbs) * 100)}%</b> of your orbs were greed`);
+    }
+    const breaks = p.chainBreaksByZone || [];
+    const total = breaks.reduce((a, n) => a + (n || 0), 0);
+    if (total >= 8) {
+      let worst = 0;
+      breaks.forEach((n, i) => { if ((n || 0) > (breaks[worst] || 0)) worst = i; });
+      parts.push(`your chain breaks most in <b>${zoneByIndex(worst).name}</b>`);
+    }
+    $('over-read').innerHTML = parts.join(' · ');
 
     this._renderMissions($('over-missions'), p, true);
 
@@ -490,7 +519,9 @@ export class UI {
         <div class="mark">${a.unlocked ? '✓' : '•'}</div>
         <div class="body">
           <div class="name">${escapeHtml(a.name)}</div>
-          <div class="desc">${escapeHtml(a.desc)}</div>
+          <div class="desc">${escapeHtml(a.desc)}${
+  a.unlocked ? '' : ` <span class="at">· ${commas(a.at)} / ${commas(a.goal)}</span>`
+}</div>
         </div>
         <div class="reward">${a.unlocked ? 'EARNED' : `+${a.reward}`}</div>`;
       list.appendChild(el);
@@ -498,6 +529,25 @@ export class UI {
   }
 
   // ----------------------------------------------------------------- shop ---
+
+  _buildDifficulty() {
+    const row = $('difficulty-row');
+    row.innerHTML = '';
+    for (const preset of DIFFICULTIES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-ui', '');
+      btn.setAttribute('data-difficulty', preset.id);
+      btn.setAttribute('aria-pressed', 'false');
+      btn.textContent = preset.name;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.h.onUiSound?.();
+        this.h.onDifficulty?.(preset.id);
+      });
+      row.appendChild(btn);
+    }
+  }
 
   _buildShopTabs() {
     const tabs = $('shop-tabs');

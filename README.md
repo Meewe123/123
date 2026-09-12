@@ -14,7 +14,7 @@ That is the entire control scheme.
   <img src="docs/preview/2-safe-or-greed.png" width="196" alt="Safe line or greed orb" />
   <img src="docs/preview/3-inferno.png" width="196" alt="The Inferno zone" />
   <img src="docs/preview/5-overdrive.png" width="196" alt="OVERDRIVE at x8" />
-  <img src="docs/preview/6-void.png" width="196" alt="The Void zone" />
+  <img src="docs/preview/7-singularity.png" width="196" alt="The Singularity zone" />
 </p>
 
 ---
@@ -26,7 +26,7 @@ That is the entire control scheme.
 | **The game** | `www/` — a zero-dependency ES-module web app. No engine, no framework, no bundler. |
 | **The native app** | `ios/` — a real Xcode project (Capacitor 8, Swift Package Manager, no CocoaPods). |
 | **The art** | `tools/make_icons.py` — every icon and the launch image are generated from code. |
-| **The tests** | `tests/` — 79 head-less simulation/meta tests, a 66-check browser end-to-end run, and an 11-check run of the single-file build. |
+| **The tests** | `tests/` — 86 head-less simulation/meta tests, a 66-check browser end-to-end run, and an 11-check run of the single-file build. |
 | **The listing** | `store/` — description, keywords, privacy policy, App Privacy answers, review notes, and generated screenshots. |
 
 No ads, no analytics, no in-app purchases, no accounts, no network calls. The
@@ -81,6 +81,16 @@ The game is the choice inside that:
 * **One goal at a time.** The home screen names the nearest thing left to earn
   and how close it is. An achievement that names an action always beats a price
   tag; when they are all earned, the cheapest cosmetic still missing takes over.
+  The profile screen carries the same arithmetic — every achievement shows how
+  far along it is, so "land 500 PERFECTs" reads as a distance, not a wall.
+* **Three ramps, one ceiling.** EASY, NORMAL and HARD change only how fast the
+  difficulty climbs — 0.67 s between rings at ring 60 on EASY against 0.53 s on
+  HARD, converging by ring 600. The geometry is computed from whatever
+  difficulty is live, so an easier ramp is exactly as honest as a harder one,
+  and each preset keeps its own best score rather than overwriting yours.
+* **After the run.** The summary says one true thing about how you played —
+  your share of greed orbs, your PERFECT rate, or the zone your chain keeps
+  breaking in — instead of repeating the score back at you.
 * **Shape before colour.** Every pickup has its own silhouette — a shard is a
   disc, a shield a hexagon, slow-mo a square, double-score a diamond — so the
   four are told apart with no colour vision at all. *Colour-safe pickups* adds a
@@ -103,7 +113,7 @@ test, not by hand.
 Shields arrive on a schedule you can count on — ring 10, then every 15 — and
 each one takes two rings before it breaks.
 
-### The eight zones
+### The ten zones
 
 Every fourteen rings the world changes. Not just the palette: the hazard, the
 ambient particles, the background behaviour, the synth voice and the PERFECT
@@ -119,6 +129,8 @@ effect all change together.
 | 6 | **GHOST** | the ring appears late | an echo of you | ghostly |
 | 7 | **STORM** | fast rotation, two gaps | a lightning strike | storm |
 | 8 | **VOID** | drift and reversal together | almost nothing | minimal |
+| 9 | **PULSAR** | two gaps, breathing, alternating | ripples on the beat | bright |
+| 10 | **SINGULARITY** | twin rings with sliding gaps | the flourish falls inward | heavy |
 
 Readability wins over spectacle everywhere: no effect is allowed to fire across
 the approach, and reduced-effects mode swaps every zone recipe for the cheapest
@@ -131,7 +143,7 @@ one without touching the simulation.
 * **Three missions a day**, rolled deterministically from the date — take twelve
   greed orbs, reach Zone 4 without a shield, beat your own best.
 * **A streak** that pays at 3, 7, 14 and 30 days, and never punishes a miss.
-* **Twelve achievements and twenty-four cosmetics** across skins, trails and
+* **Sixteen achievements and twenty-four cosmetics** across skins, trails and
   PERFECT effects. Some bought with shards, some earned, none of them touching
   how the game plays.
 
@@ -243,8 +255,8 @@ store/                     everything App Store Connect asks for
 ## Testing
 
 ```bash
-npm test            # 67 head-less tests: simulation, fairness, economy, assets
-npm run test:e2e    # 52 checks in real Chromium at phone/tablet/landscape sizes
+npm test            # 86 head-less tests: simulation, fairness, economy, assets
+npm run test:e2e    # 66 checks in real Chromium at phone/tablet/landscape sizes
 npm run test:bundle # 11 checks driving the single-file build off the filesystem
 npm run verify      # icons + all three suites
 ```

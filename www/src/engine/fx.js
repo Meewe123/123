@@ -124,15 +124,43 @@ export class Fx {
   text(x, y, str, opts = {}) {
     const t = this.texts[this.ti];
     this.ti = (this.ti + 1) % MAX_TEXTS;
+    const size = opts.size || 20;
     t.active = true;
-    t.x = x; t.y = y;
+    t.x = x;
+    // Two labels can land at once — twin rings clear together, and a PERFECT
+    // arrives with its payout. Stack the second one above the first instead of
+    // printing them on top of each other, where neither can be read.
+    t.y = this._clearRow(x, y, str, size, t);
     t.text = str;
     t.vy = opts.vy ?? -46;
     t.maxLife = opts.life || 0.9;
     t.life = t.maxLife;
     t.color = opts.color || '#ffffff';
-    t.size = opts.size || 20;
+    t.size = size;
     t.weight = opts.weight || 800;
+  }
+
+  /**
+   * The first vertical slot near `y` that no live label already occupies.
+   * Approximate on purpose: widths are estimated from the character count
+   * rather than measured, because this runs while the frame is being built and
+   * a wrong guess only costs a slightly larger gap.
+   */
+  _clearRow(x, y, str, size, self) {
+    const halfWidth = str.length * size * 0.3;
+    let row = y;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let clash = false;
+      for (const other of this.texts) {
+        if (!other.active || other === self) continue;
+        if (Math.abs(other.y - row) >= size * 1.15) continue;
+        const otherHalf = other.text.length * other.size * 0.3;
+        if (Math.abs(other.x - x) < halfWidth + otherHalf) { clash = true; break; }
+      }
+      if (!clash) return row;
+      row -= size * 1.25;
+    }
+    return row;
   }
 
   addShake(amount) {

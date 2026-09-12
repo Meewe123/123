@@ -18,7 +18,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "store", "screenshots", "6.9-inch")
 DST = os.path.join(ROOT, "docs", "preview")
 TARGET_WIDTH = 380
-SHOTS = ["1-title", "2-safe-or-greed", "3-inferno", "4-frozen", "5-overdrive", "6-void", "7-shop", "8-daily"]
+SHOTS = ["1-title", "2-safe-or-greed", "3-inferno", "4-frozen", "5-overdrive",
+         "6-void", "7-singularity", "8-shop", "9-daily"]
 
 
 def read_png(path):

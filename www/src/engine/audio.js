@@ -17,7 +17,7 @@ const SILENT_CLIP = 'data:audio/wav;base64,UklGRiwAAABXQVZFZm10IBAAAAABAAEAQB8AA
  * shapes, filter and layer balance move, so a zone can sound completely
  * different without shipping a single byte of audio.
  */
-const VOICES = {
+export const VOICES = {
   calm: { arp: 'triangle', pad: 'sawtooth', cutoff: 900, arpGain: 1.0, hats: 1.0, sub: 1.0, detune: 7, padGain: 1.0, perfect: [31, 36] },
   electric: { arp: 'square', pad: 'sawtooth', cutoff: 1500, arpGain: 0.85, hats: 1.3, sub: 0.9, detune: 14, padGain: 0.8, perfect: [31, 38] },
   intense: { arp: 'sawtooth', pad: 'sawtooth', cutoff: 1300, arpGain: 1.05, hats: 1.2, sub: 1.35, detune: 10, padGain: 1.1, perfect: [28, 35] },
@@ -26,6 +26,8 @@ const VOICES = {
   ghostly: { arp: 'sine', pad: 'triangle', cutoff: 700, arpGain: 0.75, hats: 0.5, sub: 0.85, detune: 16, padGain: 1.2, perfect: [29, 34] },
   storm: { arp: 'sawtooth', pad: 'sawtooth', cutoff: 1800, arpGain: 1.15, hats: 1.5, sub: 1.4, detune: 12, padGain: 1.0, perfect: [26, 33] },
   void: { arp: 'sine', pad: 'sine', cutoff: 520, arpGain: 0.5, hats: 0.15, sub: 1.15, detune: 4, padGain: 0.7, perfect: [24, 31] },
+  pulsar: { arp: 'square', pad: 'triangle', cutoff: 2200, arpGain: 0.9, hats: 1.45, sub: 1.1, detune: 6, padGain: 0.9, perfect: [33, 40] },
+  singularity: { arp: 'sawtooth', pad: 'sawtooth', cutoff: 820, arpGain: 1.1, hats: 1.1, sub: 1.5, detune: 26, padGain: 1.15, perfect: [22, 29] },
 };
 
 export class AudioEngine {

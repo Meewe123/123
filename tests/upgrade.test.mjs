@@ -8,9 +8,10 @@ import { resolvePerfectEffect, EFFECT_IDS } from '../www/src/game/effects.js';
 import { createAutopilot, stepAutopilot } from '../www/src/game/autopilot.js';
 import * as daily from '../www/src/game/daily.js';
 import * as store from '../www/src/engine/storage.js';
-import { encodeChallenge, decodeChallenge } from '../www/src/services/challenge.js';
+import { encodeChallenge, decodeChallenge, ChallengeService } from '../www/src/services/challenge.js';
 import { LocalStore, LeaderboardService, DailyLeaderboardService } from '../www/src/services/leaderboard.js';
 import { PurchaseService } from '../www/src/services/purchase.js';
+import { Fx } from '../www/src/engine/fx.js';
 
 const DT = 1 / 120;
 
@@ -343,4 +344,44 @@ test('a PERFECT effect falls back through cosmetic, skin, then zone', () => {
     'an equipped effect beats everything');
   assert.ok(EFFECT_IDS.includes(resolvePerfectEffect('zone', signatureSkin, zone)),
     'and whatever it resolves to has a recipe');
+});
+
+test('a shared challenge opens from a link, not from a typed code', () => {
+  // The web build reads the address bar; the native shell is handed a URL when
+  // someone taps a shared link. Both have to end up at the same run, or the
+  // code has to be copied by hand and nobody does that.
+  const challenge = { mode: 'endless', seed: 123456, score: 780 };
+  const code = encodeChallenge(challenge);
+  const svc = new ChallengeService({ location: { href: `https://example.test/?c=${code}` } });
+
+  assert.deepEqual(svc.incoming(), challenge, 'the address bar still works');
+  assert.deepEqual(svc.fromUrl(`orbitalrush://c=${code}`), challenge, 'custom scheme');
+  assert.deepEqual(svc.fromUrl(`orbitalrush:///?c=${code}`), challenge, 'scheme with a query');
+  assert.deepEqual(svc.fromUrl(`https://example.test/play?c=${code}&utm=x`), challenge, 'a link with baggage');
+
+  for (const junk of ['orbitalrush://nothing', 'not a url', '', null, undefined, 'https://example.test/']) {
+    assert.equal(svc.fromUrl(junk), null, `accepted junk: ${String(junk)}`);
+  }
+});
+
+test('two labels that land together are stacked, not printed on top of each other', () => {
+  // SINGULARITY and INFERNO clear twin rings a few frames apart, and a PERFECT
+  // arrives alongside its payout — so the same spot gets two labels at once.
+  const fx = new Fx();
+  fx.text(200, 400, 'PERFECT', { size: 22 });
+  fx.text(200, 400, 'PERFECT', { size: 22 });
+  fx.text(205, 400, '+4 GREED', { size: 18 });
+  const live = fx.texts.filter((t) => t.active);
+  assert.equal(live.length, 3);
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) {
+      const apart = Math.abs(live[i].y - live[j].y);
+      assert.ok(apart >= Math.min(live[i].size, live[j].size),
+        `labels ${live[i].text} and ${live[j].text} overlap: ${apart.toFixed(1)}px apart`);
+    }
+  }
+  // A label somewhere else on screen is left exactly where it was asked for.
+  fx.text(50, 700, 'SHIELD x2', { size: 18 });
+  const far = fx.texts.find((t) => t.active && t.text === 'SHIELD x2');
+  assert.equal(far.y, 700);
 });

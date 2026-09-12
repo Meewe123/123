@@ -133,7 +133,23 @@ const SCENES = [
     },
   },
   {
-    name: '7-shop',
+    name: '7-singularity',
+    settle: 2600,
+    setup: () => {
+      const g = globalThis.__ORBITAL__;
+      g.profile.ownedSkins.push('frost');
+      g.profile.skin = 'frost';
+      g.profile.trail = 'comet';
+      g.world.jumpTo(9 * 14 + 6);
+    },
+    pose: () => {
+      const g = globalThis.__ORBITAL__;
+      g.world.combo = 28;
+      g.world.shards = 1140;
+    },
+  },
+  {
+    name: '8-shop',
     settle: 900,
     setup: () => {
       const g = globalThis.__ORBITAL__;
@@ -147,7 +163,7 @@ const SCENES = [
     },
   },
   {
-    name: '8-daily',
+    name: '9-daily',
     settle: 1100,
     setup: () => {
       const g = globalThis.__ORBITAL__;

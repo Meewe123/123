@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { World, EVT, BAND_HALF, PLAYER_HALF } from '../www/src/game/world.js';
-import { TUNE, ZONES, difficultyAt, zoneIndexAt } from '../www/src/game/config.js';
+import {
+  TUNE, ZONES, difficultyAt, zoneIndexAt, DIFFICULTIES,
+} from '../www/src/game/config.js';
 import { angleDist, wrap } from '../www/src/engine/util.js';
 import { createAutopilot, stepAutopilot } from '../www/src/game/autopilot.js';
 import { playRun } from './bot.mjs';
@@ -76,6 +78,7 @@ test('an aimed gap is reachable from anywhere inside the previous gap', () => {
   // Every ring the generator emits must be reachable from the previous one,
   // otherwise the run contains a wall the player cannot pass by any input.
   let checked = 0;
+  const reachZones = new Set();
   for (const seed of [99, 100, 101]) {
     const w = new World(seed);
     const bot = createAutopilot({ greedy: false });
@@ -106,11 +109,14 @@ test('an aimed gap is reachable from anywhere inside the previous gap', () => {
         previous.angle = ring.targetAngle;
         previous.travel = ring.spawnTravel;
         previous.half = ring.gaps[ring.targetGap].half;
+        reachZones.add(ring.zone);
         checked++;
       }
     }
   }
   assert.ok(checked > 200, `only checked ${checked} rings`);
+  assert.equal(reachZones.size, ZONES.length,
+    `reachability was never checked in zones ${ZONES.map((z, i) => i).filter((i) => !reachZones.has(i)).join(',')}`);
 });
 
 test('flipping reverses the orbit and is reported as an event', () => {
@@ -335,6 +341,9 @@ test('the player never survives touching a wall', () => {
 test('no ring is narrower than the player can sweep through', () => {
   // A gap has to hold the player's width plus everything that moves past them
   // while the ring is in contact, or it would be impossible however well timed.
+  // Every zone has to be inspected, not just the early ones: a new zone whose
+  // flags widen the sweep must still satisfy the floor.
+  const zonesSeen = new Set();
   for (const seed of [11, 22, 33]) {
     const w = new World(seed);
     const bot = createAutopilot({ greedy: false });
@@ -346,6 +355,7 @@ test('no ring is narrower than the player can sweep through', () => {
       for (const ring of w.rings) {
         if (seen.has(ring.id)) continue;
         seen.add(ring.id);
+        zonesSeen.add(ring.zone);
         const floor = w._minGapHalf(ring);
         for (const gap of ring.gaps) {
           assert.ok(gap.half >= floor - 1e-9,
@@ -355,6 +365,8 @@ test('no ring is narrower than the player can sweep through', () => {
     }
     assert.ok(seen.size > 40, `only inspected ${seen.size} rings`);
   }
+  assert.equal(zonesSeen.size, ZONES.length,
+    `the gap floor was never checked in every zone — saw ${zonesSeen.size}`);
 });
 
 test('the player is a ball: both collision extents come from one radius', () => {
@@ -486,4 +498,65 @@ test('greed and dead centre are different lines', () => {
   const share = outside / greed;
   assert.ok(share > 0.25 && share < 0.75,
     `${(share * 100).toFixed(0)}% of greed orbs force the choice — the tension is ${share <= 0.25 ? 'gone' : 'constant'}`);
+});
+
+test('a difficulty preset changes the pace, never the fairness', () => {
+  // The whole claim behind presets: they scale the ramp, and the gap floor and
+  // the reachable arc are computed from whatever difficulty is live at that
+  // moment. So an easier game has to be exactly as honest as a harder one, and
+  // that is worth proving rather than asserting.
+  for (const preset of DIFFICULTIES) {
+    const w = new World(88);
+    w.reset(88, { difficulty: preset.id });
+    const bot = createAutopilot({ greedy: false });
+    const seen = new Set();
+    let rings = 0;
+    for (let i = 0; i < 120 * 150 && w.alive; i++) {
+      stepAutopilot(w, bot);
+      w.update(DT);
+      w.events.length = 0;
+      for (const ring of w.rings) {
+        if (seen.has(ring.id)) continue;
+        seen.add(ring.id);
+        rings++;
+        const floor = w._minGapHalf(ring);
+        for (const gap of ring.gaps) {
+          assert.ok(gap.half >= floor - 1e-9,
+            `${preset.id}: gap ${gap.half.toFixed(3)} under the floor ${floor.toFixed(3)}`);
+        }
+        for (const orb of ring.orbs) {
+          assert.equal(orb.gapIndex, ring.targetGap, `${preset.id}: orb outside the aimed gap`);
+        }
+      }
+    }
+    assert.ok(rings > 40, `${preset.id}: only inspected ${rings} rings`);
+  }
+});
+
+test('a world built with options honours them without a second reset', () => {
+  // The constructor used to drop its options on the floor: `new World(seed,
+  // { difficulty: 'hard' })` quietly played NORMAL, and only an explicit
+  // `reset` applied the preset. Nothing in the game hit it, and a measurement
+  // script did.
+  const hard = new World(5, { difficulty: 'hard' });
+  assert.equal(hard.difficultyId, 'hard');
+  assert.equal(hard.ramp, DIFFICULTIES[2].ramp);
+  assert.ok(new World(5, { practice: true }).practice, 'practice is ignored too');
+  assert.equal(new World(5).difficultyId, 'normal', 'and the default is unchanged');
+});
+
+test('easy really is easier and hard really is harder', () => {
+  // A preset that does not move the curve is a placebo, and one that moves it
+  // the wrong way is a bug. Compare the ramp at the same score.
+  const [easy, normal, hard] = DIFFICULTIES;
+  for (const score of [20, 60, 150]) {
+    assert.ok(difficultyAt(score, easy.ramp) < difficultyAt(score, normal.ramp),
+      `easy is not gentler at ${score}`);
+    assert.ok(difficultyAt(score, hard.ramp) > difficultyAt(score, normal.ramp),
+      `hard is not steeper at ${score}`);
+  }
+  // Same ceiling in all three: a preset changes when, not whether.
+  for (const preset of DIFFICULTIES) {
+    assert.ok(difficultyAt(1e6, preset.ramp) > 0.999, `${preset.id} never gets there`);
+  }
 });

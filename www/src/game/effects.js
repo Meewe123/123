@@ -103,6 +103,40 @@ const RECIPES = {
     fx.burst(o.x, o.y, 6, { color: ['#ffffff'], speed: 70, size: r.unit * 0.006, life: 0.9, drag: 1 });
   },
 
+  /** PULSAR — concentric ripples leaving on the beat. */
+  ripple(fx, r, o) {
+    // All three start together; the differing ranges and lifetimes mean they
+    // are always at different radii, so the eye reads one travelling ripple.
+    for (let i = 0; i < 3; i++) {
+      fx.wave(o.x, o.y, r.unit * (0.02 + i * 0.07), r.unit * (0.20 + i * 0.14), {
+        color: i === 1 ? o.accent : o.color,
+        width: 3.5 - i * 0.8,
+        life: 0.30 + i * 0.18,
+      });
+    }
+    fx.burst(o.x, o.y, 8, {
+      color: [o.color, o.accent], speed: 130, size: r.unit * 0.007, life: 0.5,
+      shape: 'dot', angle: o.outward, spread: 1.4, drag: 2.8,
+    });
+  },
+
+  /** SINGULARITY — the flourish falls inward instead of out. */
+  collapse(fx, r, o) {
+    // Spawned just outside the orbit and aimed at the core, so the debris
+    // crosses the empty middle rather than the incoming rings.
+    for (let i = 0; i < 7; i++) {
+      const a = o.angle + (i - 3) * 0.11;
+      const p = at(r, a, TUNE.playerOrbit + 0.05);
+      fx.burst(p.x, p.y, 2, {
+        color: [o.color, o.accent], speed: 210, size: r.unit * 0.008, life: 0.55,
+        shape: 'spark', angle: a + Math.PI, spread: 0.26, drag: 0.9,
+      });
+    }
+    // A wave that closes instead of opening.
+    fx.wave(o.x, o.y, r.unit * 0.34, r.unit * 0.02, { color: o.color, width: 2.5, life: 0.5 });
+    fx.addFlash(0.09, o.accent);
+  },
+
   // ---- cosmetic overrides, available in every zone ----------------------
 
   ring(fx, r, o) {

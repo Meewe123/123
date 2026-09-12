@@ -13,6 +13,8 @@ import { existsSync, readdirSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { SAVE_VERSION } from '../www/src/engine/storage.js';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const PORT = 8199;
@@ -234,7 +236,8 @@ async function main() {
     check('profile was written to storage', !!over.stored && over.stored.bestScore === over.score,
       `bestScore=${over.stored?.bestScore} score=${over.score}`);
     check('run counted in lifetime stats', over.stored.runs === 1, `runs=${over.stored?.runs}`);
-    check('save is on the current schema', over.stored.version === 2, `version=${over.stored?.version}`);
+    check('save is on the current schema', over.stored.version === SAVE_VERSION,
+      `version=${over.stored?.version}, expected ${SAVE_VERSION}`);
     check('the daily login bonus was granted', over.stored.shards > 0, `shards=${over.stored?.shards}`);
     await page.screenshot({ path: `${SHOTS}/05-gameover.png` });
 
@@ -321,7 +324,7 @@ async function main() {
     check('the collection total matches what it lists',
       (await page.locator('#collection-count').innerText()).endsWith(`/${expectedChips}`),
       await page.locator('#collection-count').innerText());
-    check('achievements are listed', await page.locator('#achievement-list .ach').count() === 12);
+    check('achievements are listed', await page.locator('#achievement-list .ach').count() === 16);
     await page.screenshot({ path: `${SHOTS}/08-collection.png` });
 
     await page.locator('#btn-collection-back').click();

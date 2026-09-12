@@ -113,6 +113,11 @@ class Game {
       onPlay: () => this.startRun({ mode: 'endless' }),
       onDaily: () => this.startRun({ mode: 'daily' }),
       onPractice: () => this.startRun({ mode: 'practice' }),
+      onDifficulty: (id) => {
+        this.profile.difficulty = id;
+        store.saveSoon(this.profile);
+        this.ui.refreshTitle();
+      },
       onPause: () => this.pause(),
       onResume: () => this.resume(),
       onRestart: () => this.startRun({ mode: this.runMode }),
@@ -181,6 +186,17 @@ class Game {
 
     const cap = globalThis.Capacitor;
     if (cap?.Plugins?.App) {
+      // A shared challenge link opens the app straight onto that seed. The link
+      // can arrive while the app is already running, so this is a listener and
+      // not only a boot-time read.
+      cap.Plugins.App.addListener('appUrlOpen', ({ url } = {}) => {
+        const challenge = this.challenges.fromUrl(url);
+        if (!challenge) return;
+        this.challenge = challenge;
+        if (this.mode === 'attract') {
+          this.ui.toast(`CHALLENGE · BEAT ${commas(challenge.score)}`, 2600);
+        }
+      });
       cap.Plugins.App.addListener('backButton', () => {
         if (this.mode === 'play') this.pause();
         else if (this.ui.current && this.ui.current !== 'title') this.ui.show('title');
@@ -269,14 +285,18 @@ class Game {
       }
     }
 
-    this.world.reset(runSeed, { practice });
+    // The daily is always NORMAL: a shared seed only means something if everyone
+    // is climbing the same ramp.
+    const difficulty = mode === 'daily' ? 'normal' : this.profile.difficulty;
+    this.world.reset(runSeed, { practice, difficulty });
     // Identifies this run across a revive, so it files one score, not two.
     this.runId = `${runSeed}:${Date.now()}`;
     this.autopilot = createAutopilot({ greedy: true, sloppiness: 0.05 });
     this.fx.clear();
     this.renderer.resetRun();
     this.runCommitted = {
-      score: 0, shards: 0, orbs: 0, greedOrbs: 0, perfects: 0, timeMs: 0, counted: false,
+      score: 0, shards: 0, orbs: 0, greedOrbs: 0, perfects: 0, chainSaves: 0,
+      timeMs: 0, counted: false,
     };
     this.pendingResult = null;
     this.deathTimer = 0;
@@ -377,13 +397,15 @@ class Game {
       orbs: w.orbsCollected - c.orbs,
       greedOrbs: w.greedOrbs - c.greedOrbs,
       perfects: w.perfects - c.perfects,
+      chainSaves: w.chainSaves - c.chainSaves,
       bestChain: w.bestChain,
       bestMultiplier: w.bestMultiplier,
       zoneReached: w.zone,
       noShieldZone: w.noShieldZone,
       timeMs: w.time * 1000 - c.timeMs,
       countRun: !c.counted,
-      isBest: w.score > this.profile.bestScore,
+      difficulty: w.difficultyId,
+      isBest: w.score > (this.profile.bests?.[w.difficultyId] ?? this.profile.bestScore),
     };
 
     const isBest = meta.commitRun(this.profile, run);
@@ -425,6 +447,7 @@ class Game {
     c.orbs = w.orbsCollected;
     c.greedOrbs = w.greedOrbs;
     c.perfects = w.perfects;
+    c.chainSaves = w.chainSaves;
     c.timeMs = w.time * 1000;
     c.counted = true;
 
@@ -754,6 +777,12 @@ class Game {
       }
 
       case EVT.COMBO_BREAK: {
+        // Counted where it happens rather than folded in at the end: a revived
+        // run continues in the same world, so each break is seen exactly once.
+        if (this.mode === 'play' && !this.world.practice) {
+          const by = this.profile.chainBreaksByZone || (this.profile.chainBreaksByZone = []);
+          by[e.zone] = (by[e.zone] || 0) + 1;
+        }
         if (!quiet) {
           this.fx.text(r.cx, r.cy + r.unit * 0.82, `CHAIN LOST · x${e.from} → x1`, {
             color: 'rgba(255,255,255,0.62)', size: Math.round(r.unit * 0.05), life: 1,

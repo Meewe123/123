@@ -284,6 +284,21 @@ export class Renderer {
           size *= 1.6;
           tall = 2.4;
           break;
+        case 'pulse': {
+          // PULSAR: brightness travels outward as a band, on the beat.
+          const band = Math.sin(t * 3.4 - s.r * 0.022 + s.tw * 0.4);
+          alpha *= 0.45 + 1.9 * Math.max(0, band) ** 3;
+          size *= 1.1;
+          break;
+        }
+        case 'fall':
+          // SINGULARITY: matter drifting in, brighter the closer it gets.
+          radius = s.r - ((t * 54 * s.depth + s.tw * 140) % 300);
+          if (radius < 0) radius += 300;
+          alpha *= 0.5 + 0.9 * (1 - radius / (s.r || 1));
+          size *= 0.9;
+          tall = 1.8;
+          break;
         case 'rain':
           // STORM: streaks driven inward, fast.
           radius = s.r - ((t * 320 * s.depth + s.tw * 200) % 360);
@@ -328,7 +343,10 @@ export class Renderer {
     // GHOST and VOID want the whole frame pulled down. That is the vignette's
     // job — folding it in there costs nothing instead of a second full-screen
     // fill every frame.
-    this.zoneDark = style === 'void' ? 0.22 : style === 'ghost' ? 0.12 : 0;
+    this.zoneDark = style === 'void' ? 0.22
+      : style === 'event' ? 0.16
+      : style === 'ghost' ? 0.12
+      : 0;
     if (this.reduced || style === 'calm') return;
     const t = this.clock;
 
@@ -378,6 +396,29 @@ export class Renderer {
         ctx.lineTo(this.cx + Math.cos(a + 0.5) * this.unit * 1.9, this.cy + Math.sin(a + 0.5) * this.unit * 1.9);
         ctx.stroke();
       }
+    } else if (style === 'pulse') {
+      // PULSAR: a beacon sweeping outward, never inside the play area.
+      const phase = (t * 0.55) % 1;
+      ctx.globalAlpha = 0.11 * (1 - phase);
+      ctx.strokeStyle = rgba(this.pal.ring, 1);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, this.unit * (1.08 + phase * 1.1), 0, TAU);
+      ctx.stroke();
+    } else if (style === 'event') {
+      // SINGULARITY: the horizon itself — one bright rim outside the rings,
+      // breathing. The darkening is folded into the vignette above.
+      ctx.globalAlpha = 0.13;
+      ctx.strokeStyle = rgba(this.pal.accent, 1);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, this.unit * (1.12 + 0.035 * Math.sin(t * 1.9)), 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = 0.05;
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, this.unit * (1.2 + 0.05 * Math.sin(t * 1.9 + 0.6)), 0, TAU);
+      ctx.stroke();
     } else if (style === 'warp') {
       ctx.globalAlpha = 0.06;
       ctx.strokeStyle = rgba(this.pal.accent, 1);

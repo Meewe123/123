@@ -258,6 +258,20 @@ test('the home screen is always pointed at something reachable', () => {
   assert.equal(meta.nextGoal(profile), null);
 });
 
+test('a goal that is already met is never the next goal', () => {
+  // Achievements are granted when a run is committed, so between the moment a
+  // counter crosses its target and the end of that run the profile holds a
+  // finished-but-ungranted achievement. The home screen must not point at it:
+  // there is nothing left for the player to do about it.
+  const profile = store.migrate(null);
+  profile.totalPerfects = 1e6;
+  profile.totalOrbs = 1e6;
+  profile.bestZone = 99;
+  const goal = meta.nextGoal(profile);
+  assert.ok(goal, 'something is still to be earned');
+  assert.ok(goal.at < goal.goal, `pointed at ${goal.name}, already ${goal.at}/${goal.goal}`);
+});
+
 test('achievement progress is a real fraction, not a guess', () => {
   const profile = store.migrate(null);
   for (const a of ACHIEVEMENTS) {

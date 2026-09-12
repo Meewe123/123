@@ -280,10 +280,17 @@ export function commitRun(profile, run) {
   profile.totalPerfects += run.perfects;
   profile.totalOrbs += run.orbs;
   profile.totalGreedOrbs += run.greedOrbs;
+  profile.totalChainSaves += run.chainSaves || 0;
   grantShards(profile, run.shards);
 
-  const isBest = run.score > profile.bestScore;
-  if (isBest) profile.bestScore = run.score;
+  // One record per preset: an easy best and a hard best are not the same claim,
+  // and collapsing them into one number would quietly retire somebody's record
+  // the first time they tried an easier ramp.
+  const bests = profile.bests || (profile.bests = { easy: 0, normal: 0, hard: 0 });
+  const preset = run.difficulty in bests ? run.difficulty : 'normal';
+  const isBest = run.score > (bests[preset] || 0);
+  if (isBest) bests[preset] = run.score;
+  profile.bestScore = Math.max(profile.bestScore, bests.easy, bests.normal, bests.hard);
   if (run.bestChain > profile.bestChain) profile.bestChain = run.bestChain;
   if (run.bestMultiplier > profile.bestMultiplier) profile.bestMultiplier = run.bestMultiplier;
   if (run.zoneReached > profile.bestZone) profile.bestZone = run.zoneReached;
@@ -307,6 +314,9 @@ export function nextGoal(profile) {
   for (const a of ACHIEVEMENTS) {
     if (isUnlocked(profile, a.id)) continue;
     const at = achievementAt(a, profile);
+    // Already satisfied but not yet granted — it lands at the end of the next
+    // run. Pointing at it would name a goal there is nothing left to do about.
+    if (at >= a.goal) continue;
     const share = at / a.goal;
     const better = !best
       || share > best.share

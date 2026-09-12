@@ -9,6 +9,7 @@ import {
   MISSION_TEMPLATES, DAILY_REWARDS, STREAK_MILESTONES, achievementById,
 } from '../www/src/game/config.js';
 import { EFFECT_IDS } from '../www/src/game/effects.js';
+import { VOICES } from '../www/src/engine/audio.js';
 import { skinTones } from '../www/src/game/palette.js';
 import * as store from '../www/src/engine/storage.js';
 
@@ -16,7 +17,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const HEX = /^#[0-9a-f]{6}$/i;
 
 test('every zone is complete and playable', () => {
-  assert.equal(ZONES.length, 8, 'eight zones, each with its own atmosphere');
+  assert.equal(ZONES.length, 10, 'ten zones, each with its own atmosphere');
   const ids = new Set();
   for (const zone of ZONES) {
     assert.ok(zone.id && !ids.has(zone.id), `duplicate zone id: ${zone.id}`);
@@ -126,12 +127,38 @@ test('every PERFECT effect a zone or cosmetic names actually exists', () => {
   }
 });
 
+test('every zone names an atmosphere the renderer and synth can actually play', () => {
+  // A new zone is one table row plus four implementations: a PERFECT recipe, a
+  // mote style, a sky overlay and a synth voice. The recipe is checked above by
+  // id; these three were added without a branch once, and the zone silently
+  // looked and sounded like FLOW, so they are checked too.
+  const render = readFileSync(resolve(ROOT, 'www/src/game/render.js'), 'utf8');
+  // The deliberate fall-through cases: these have no branch of their own.
+  const moteDefaults = new Set(['drift', 'none']);
+  const skyDefaults = new Set(['calm']);
+  for (const zone of ZONES) {
+    assert.ok(
+      moteDefaults.has(zone.fx.motes) || render.includes(`case '${zone.fx.motes}':`),
+      `zone ${zone.id} wants mote style '${zone.fx.motes}', which the renderer never draws`,
+    );
+    assert.ok(
+      skyDefaults.has(zone.fx.sky) || render.includes(`style === '${zone.fx.sky}'`),
+      `zone ${zone.id} wants sky '${zone.fx.sky}', which the renderer never draws`,
+    );
+    assert.ok(zone.voice in VOICES,
+      `zone ${zone.id} wants synth voice '${zone.voice}', which the synth does not have`);
+  }
+});
+
 test('achievements are unique, earnable and pay out', () => {
   const ids = new Set();
-  const profile = {
-    totalPerfects: 1e6, bestZone: 99, bestMultiplier: 99, totalOrbs: 1e6,
-    totalGreedOrbs: 1e6, noShieldZone: 99, dailyRuns: 99,
-  };
+  // Derived from the real profile shape rather than hand-listed, so an
+  // achievement that reads a field the save does not have fails here instead of
+  // sitting in the list forever at zero progress.
+  const profile = {};
+  for (const [key, value] of Object.entries(store.DEFAULT_PROFILE)) {
+    if (typeof value === 'number') profile[key] = 1e6;
+  }
   for (const a of ACHIEVEMENTS) {
     assert.ok(!ids.has(a.id), `duplicate achievement id: ${a.id}`);
     ids.add(a.id);
@@ -141,7 +168,7 @@ test('achievements are unique, earnable and pay out', () => {
     assert.ok(a.test(profile), `${a.id} is unreachable even for a maxed profile`);
     assert.equal(a.test({}), false, `${a.id} fires on an empty profile`);
   }
-  assert.equal(ACHIEVEMENTS.length, 12, 'a compact set, not a checklist');
+  assert.equal(ACHIEVEMENTS.length, 16, 'a compact set, not a checklist');
 });
 
 test('every power-up has a label and a colour', () => {

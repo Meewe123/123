@@ -50,9 +50,26 @@ export class ChallengeService {
 
   /** A challenge carried in the current URL, if there is one. */
   incoming() {
+    return this.fromUrl(this.location.href);
+  }
+
+  /**
+   * Pull a challenge out of any URL, not only the address bar. The native shell
+   * hands the app a URL when someone taps a shared link — `orbitalrush://c=...`
+   * or `https://.../?c=...` — and that has to be read the same way as a link
+   * opened in a browser, or the code has to be typed in by hand.
+   */
+  fromUrl(href) {
+    if (typeof href !== 'string') return null;
     try {
-      const params = new URLSearchParams(this.location.search);
-      return decodeChallenge(params.get('c'));
+      const url = new URL(href);
+      const fromQuery = url.searchParams.get('c');
+      if (fromQuery) return decodeChallenge(fromQuery);
+      // A custom scheme has no host to hang a query off: `orbitalrush://c=<code>`
+      // parses with the whole thing in the pathname or the host.
+      const rest = `${url.host || ''}${url.pathname || ''}`.replace(/^\/+/, '');
+      const match = rest.match(/(?:^|[?&/])c=([^&/?#]+)/);
+      return match ? decodeChallenge(decodeURIComponent(match[1])) : null;
     } catch {
       return null;
     }
